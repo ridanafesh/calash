@@ -1,5 +1,4 @@
-import type { GameRoom, GameStatus } from './game.js';
-import type { Player } from './player.js';
+import type { GameRoom } from './game.js';
 import type { RoundStateView, RoundResult, GameScore } from './round.js';
 import type { TurnAction } from './actions.js';
 
@@ -11,8 +10,12 @@ import type { TurnAction } from './actions.js';
 /** Events the client sends to the server. */
 export interface ClientToServerEvents {
   'room:create': (options: { maxPlayers: number }) => void;
+  /** Join by UUID room ID (for links / REST lookup). */
   'room:join': (roomId: string) => void;
+  /** Join by 6-character invite code. */
+  'room:join-by-code': (code: string) => void;
   'room:leave': () => void;
+  /** Toggle the calling player's ready state. */
   'room:ready': () => void;
 
   /**
@@ -36,9 +39,6 @@ export interface ServerToClientEvents {
   'game:round-result': (result: RoundResult) => void;
   'game:scores': (scores: GameScore[]) => void;
   'game:finished': (winner: { playerId: string; finalScore: number }) => void;
-
-  'player:joined': (player: Player) => void;
-  'player:left': (playerId: string) => void;
 }
 
 /** Events used between server instances (reserved for future horizontal scaling). */
@@ -49,5 +49,6 @@ export interface InterServerEvents {
 /** Data stored per socket connection on the server. */
 export interface SocketData {
   playerId: string;
+  displayName: string;
   roomId?: string;
 }

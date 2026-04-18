@@ -105,6 +105,14 @@ export type RoundEndReason =
   | 'player-finished'  // a player emptied their hand
   | 'deck-exhausted';  // the hidden draw pile ran out
 
+/** A player slot within a room lobby or active game. */
+export interface RoomPlayer {
+  userId: string;
+  displayName: string;
+  isReady: boolean;
+  isConnected: boolean;
+}
+
 /** Client-visible representation of a game room. */
 export interface GameRoom {
   id: string;
@@ -112,6 +120,6 @@ export interface GameRoom {
   hostUserId: string;
   status: GameStatus;
   maxPlayers: number;
-  playerIds: string[];
+  players: RoomPlayer[];
   currentRound: number;
 }
