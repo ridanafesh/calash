@@ -13,8 +13,13 @@ export const config = {
   jwt: {
     secret: required('JWT_SECRET'),
     expiresIn: process.env['JWT_EXPIRES_IN'] ?? '7d',
+    guestExpiresIn: process.env['JWT_GUEST_EXPIRES_IN'] ?? '24h',
   },
   cors: {
     origin: process.env['CORS_ORIGIN'] ?? 'http://localhost:3000',
+  },
+  google: {
+    // Optional — Google sign-in is disabled when not configured
+    clientId: process.env['GOOGLE_CLIENT_ID'] ?? null,
   },
 } as const;

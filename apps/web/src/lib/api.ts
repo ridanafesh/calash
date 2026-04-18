@@ -1,4 +1,13 @@
-import type { AuthResponse, LoginRequest, RegisterRequest } from '@calash/shared';
+import type {
+  AuthResponse,
+  GoogleAuthRequest,
+  LoginRequest,
+  RegisterRequest,
+  UpdateProfileRequest,
+  UpgradeWithGoogleRequest,
+  UpgradeWithPasswordRequest,
+  UserProfile,
+} from '@calash/shared';
 
 const BASE_URL = process.env['NEXT_PUBLIC_API_URL'] ?? 'http://localhost:4000';
 
@@ -20,12 +29,52 @@ function authHeaders(): Record<string, string> {
 }
 
 export const apiClient = {
+  // ── Auth ────────────────────────────────────────────────────────────────────
   register: (body: RegisterRequest) =>
     request<AuthResponse>('/api/auth/register', { method: 'POST', body: JSON.stringify(body) }),
 
   login: (body: LoginRequest) =>
     request<AuthResponse>('/api/auth/login', { method: 'POST', body: JSON.stringify(body) }),
 
+  loginWithGoogle: (body: GoogleAuthRequest) =>
+    request<AuthResponse>('/api/auth/google', { method: 'POST', body: JSON.stringify(body) }),
+
+  loginAsGuest: () =>
+    request<AuthResponse>('/api/auth/guest', { method: 'POST', body: '{}' }),
+
+  me: () =>
+    request<{ user: UserProfile }>('/api/auth/me', { headers: authHeaders() }),
+
+  logout: () =>
+    request<{ message: string }>('/api/auth/logout', { method: 'POST', headers: authHeaders() }),
+
+  // ── Profile ──────────────────────────────────────────────────────────────────
+  getProfile: () =>
+    request<{ user: UserProfile }>('/api/profile', { headers: authHeaders() }),
+
+  updateProfile: (body: UpdateProfileRequest) =>
+    request<{ user: UserProfile }>('/api/profile', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+      headers: authHeaders(),
+    }),
+
+  // ── Guest upgrade ─────────────────────────────────────────────────────────────
+  upgradeWithPassword: (body: UpgradeWithPasswordRequest) =>
+    request<AuthResponse>('/api/auth/upgrade/password', {
+      method: 'POST',
+      body: JSON.stringify(body),
+      headers: authHeaders(),
+    }),
+
+  upgradeWithGoogle: (body: UpgradeWithGoogleRequest) =>
+    request<AuthResponse>('/api/auth/upgrade/google', {
+      method: 'POST',
+      body: JSON.stringify(body),
+      headers: authHeaders(),
+    }),
+
+  // ── Health ────────────────────────────────────────────────────────────────────
   health: () =>
     request<{ status: string; db: string }>('/api/health', { headers: authHeaders() }),
 };

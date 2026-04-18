@@ -1,12 +1,24 @@
 'use client';
 
-import { useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { useState } from 'react';
 
-import { apiClient } from '@/lib/api';
+import { useAuth } from '@/lib/auth-context';
+
+const inputStyle: React.CSSProperties = {
+  padding: '0.75rem',
+  borderRadius: '0.5rem',
+  border: '1px solid var(--border)',
+  background: 'var(--bg)',
+  color: 'var(--text-primary)',
+  fontSize: '1rem',
+};
 
 export default function RegisterPage() {
   const router = useRouter();
+  const { loginWithPassword } = useAuth();
+
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -18,8 +30,10 @@ export default function RegisterPage() {
     setError('');
     setLoading(true);
     try {
-      const data = await apiClient.register({ username, email, password });
-      localStorage.setItem('token', data.token);
+      const { apiClient } = await import('@/lib/api');
+      await apiClient.register({ username, email, password });
+      // After registration, log in via context so user state is populated
+      await loginWithPassword(email, password);
       router.push('/lobby');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Registration failed');
@@ -29,7 +43,7 @@ export default function RegisterPage() {
   }
 
   return (
-    <main style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+    <main style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '1rem' }}>
       <form
         onSubmit={handleSubmit}
         style={{
@@ -44,17 +58,17 @@ export default function RegisterPage() {
           gap: '1rem',
         }}
       >
-        <h2 style={{ fontSize: '1.5rem', fontWeight: 700 }}>Create account</h2>
-        {error && <p style={{ color: 'var(--danger)', fontSize: '0.875rem' }}>{error}</p>}
+        <h1 style={{ fontSize: '1.5rem', fontWeight: 700, margin: 0 }}>Create account</h1>
+        {error && <p style={{ color: 'var(--danger)', fontSize: '0.875rem', margin: 0 }}>{error}</p>}
         <input
           type="text"
-          placeholder="Username"
+          placeholder="Username (letters, numbers, _)"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
           required
           minLength={3}
           maxLength={32}
-          style={{ padding: '0.75rem', borderRadius: '0.5rem', border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text-primary)' }}
+          style={inputStyle}
         />
         <input
           type="email"
@@ -62,7 +76,7 @@ export default function RegisterPage() {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           required
-          style={{ padding: '0.75rem', borderRadius: '0.5rem', border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text-primary)' }}
+          style={inputStyle}
         />
         <input
           type="password"
@@ -71,15 +85,21 @@ export default function RegisterPage() {
           onChange={(e) => setPassword(e.target.value)}
           required
           minLength={8}
-          style={{ padding: '0.75rem', borderRadius: '0.5rem', border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text-primary)' }}
+          style={inputStyle}
         />
         <button
           type="submit"
           disabled={loading}
-          style={{ padding: '0.75rem', borderRadius: '0.5rem', background: 'var(--accent)', color: '#fff', fontWeight: 600, border: 'none', cursor: 'pointer' }}
+          style={{ padding: '0.75rem', borderRadius: '0.5rem', background: 'var(--accent)', color: '#fff', fontWeight: 600, border: 'none', cursor: 'pointer', fontSize: '1rem' }}
         >
-          {loading ? 'Creating account…' : 'Create account'}
+          {loading ? 'Creating…' : 'Create account'}
         </button>
+        <p style={{ textAlign: 'center', fontSize: '0.875rem', color: 'var(--text-secondary)', margin: 0 }}>
+          Already have an account?{' '}
+          <Link href="/auth/login" style={{ color: 'var(--accent)' }}>
+            Sign in
+          </Link>
+        </p>
       </form>
     </main>
   );

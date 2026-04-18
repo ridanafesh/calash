@@ -4,7 +4,7 @@ import type { Pool } from 'pg';
 
 export interface UserRow {
   id: string;
-  email: string;
+  email: string | null; // null for guest accounts
   created_at: Date;
   updated_at: Date;
 }
@@ -71,12 +71,28 @@ export class UserRepository {
     } as UserWithProfile;
   }
 
+  /** Find a user by their Google provider_account_id. */
+  async findByGoogleId(googleId: string): Promise<UserWithProfile | null> {
+    const { rows } = await this.db.query<UserRow & { profile: PlayerProfileRow | null }>(
+      `SELECT
+         u.*,
+         row_to_json(pp.*) AS profile
+       FROM users u
+       JOIN auth_accounts aa ON aa.user_id = u.id
+       LEFT JOIN player_profiles pp ON pp.user_id = u.id
+       WHERE aa.provider = 'google' AND aa.provider_account_id = $1`,
+      [googleId],
+    );
+    if (!rows[0]) return null;
+    return { ...rows[0], profile: rows[0].profile ?? null } as UserWithProfile;
+  }
+
+  /** Create a user with email + password (the original flow). */
   async create(data: {
     email: string;
     username: string;
     passwordHash: string;
   }): Promise<UserWithProfile> {
-    // Use a transaction so user + auth_account + profile are atomic
     const client = await this.db.connect();
     try {
       await client.query('BEGIN');
@@ -99,7 +115,6 @@ export class UserRepository {
         [user.id, data.username],
       );
 
-      // Initialise leaderboard entry
       await client.query(
         'INSERT INTO leaderboard_entries (user_id) VALUES ($1)',
         [user.id],
@@ -107,6 +122,149 @@ export class UserRepository {
 
       await client.query('COMMIT');
       return { ...user, profile: profileRows[0] };
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  /** Create a user authenticated via Google. */
+  async createFromGoogle(data: {
+    googleId: string;
+    email: string;
+    username: string;
+    displayName?: string | null;
+    avatarUrl?: string | null;
+  }): Promise<UserWithProfile> {
+    const client = await this.db.connect();
+    try {
+      await client.query('BEGIN');
+
+      const { rows: userRows } = await client.query<UserRow>(
+        'INSERT INTO users (email) VALUES ($1) RETURNING *',
+        [data.email.toLowerCase()],
+      );
+      const user = userRows[0];
+
+      await client.query(
+        `INSERT INTO auth_accounts (user_id, provider, provider_account_id)
+         VALUES ($1, 'google', $2)`,
+        [user.id, data.googleId],
+      );
+
+      const { rows: profileRows } = await client.query<PlayerProfileRow>(
+        `INSERT INTO player_profiles (user_id, username, display_name, avatar_url)
+         VALUES ($1, $2, $3, $4) RETURNING *`,
+        [user.id, data.username, data.displayName ?? null, data.avatarUrl ?? null],
+      );
+
+      await client.query('INSERT INTO leaderboard_entries (user_id) VALUES ($1)', [user.id]);
+
+      await client.query('COMMIT');
+      return { ...user, profile: profileRows[0] };
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  /** Create a guest user with no email or password. */
+  async createGuest(username: string): Promise<UserWithProfile> {
+    const client = await this.db.connect();
+    try {
+      await client.query('BEGIN');
+
+      const { rows: userRows } = await client.query<UserRow>(
+        'INSERT INTO users DEFAULT VALUES RETURNING *',
+      );
+      const user = userRows[0];
+
+      await client.query(
+        `INSERT INTO auth_accounts (user_id, provider) VALUES ($1, 'guest')`,
+        [user.id],
+      );
+
+      const { rows: profileRows } = await client.query<PlayerProfileRow>(
+        `INSERT INTO player_profiles (user_id, username) VALUES ($1, $2) RETURNING *`,
+        [user.id, username],
+      );
+
+      await client.query('INSERT INTO leaderboard_entries (user_id) VALUES ($1)', [user.id]);
+
+      await client.query('COMMIT');
+      return { ...user, profile: profileRows[0] };
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  /** Link a Google account to an existing user (used when upgrading a guest or merging accounts). */
+  async linkGoogleAccount(
+    userId: string,
+    data: { googleId: string; email?: string; avatarUrl?: string | null },
+  ): Promise<void> {
+    const client = await this.db.connect();
+    try {
+      await client.query('BEGIN');
+
+      await client.query(
+        `INSERT INTO auth_accounts (user_id, provider, provider_account_id)
+         VALUES ($1, 'google', $2)
+         ON CONFLICT (user_id, provider) DO UPDATE SET provider_account_id = $2, updated_at = NOW()`,
+        [userId, data.googleId],
+      );
+
+      if (data.email) {
+        await client.query(
+          `UPDATE users SET email = $1, updated_at = NOW() WHERE id = $2 AND email IS NULL`,
+          [data.email.toLowerCase(), userId],
+        );
+      }
+
+      if (data.avatarUrl !== undefined) {
+        await client.query(
+          `UPDATE player_profiles SET avatar_url = COALESCE(avatar_url, $1), updated_at = NOW() WHERE user_id = $2`,
+          [data.avatarUrl, userId],
+        );
+      }
+
+      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  /** Link a password account to an existing guest user. */
+  async linkPasswordAccount(
+    userId: string,
+    data: { email: string; passwordHash: string },
+  ): Promise<void> {
+    const client = await this.db.connect();
+    try {
+      await client.query('BEGIN');
+
+      await client.query(
+        `INSERT INTO auth_accounts (user_id, provider, password_hash)
+         VALUES ($1, 'password', $2)`,
+        [userId, data.passwordHash],
+      );
+
+      await client.query(
+        `UPDATE users SET email = $1, updated_at = NOW() WHERE id = $2`,
+        [data.email.toLowerCase(), userId],
+      );
+
+      await client.query('COMMIT');
     } catch (err) {
       await client.query('ROLLBACK');
       throw err;

@@ -31,8 +31,8 @@ export function createSocketServer(httpServer: HttpServer): Server<
       return;
     }
     try {
-      const payload = jwt.verify(token, config.jwt.secret) as { playerId: string };
-      socket.data.playerId = payload.playerId;
+      const payload = jwt.verify(token, config.jwt.secret) as { userId: string };
+      socket.data.playerId = payload.userId;
       next();
     } catch {
       next(new Error('Invalid token'));
