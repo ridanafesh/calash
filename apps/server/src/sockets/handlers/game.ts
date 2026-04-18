@@ -172,6 +172,7 @@ async function handleRoundEnd(
     state.endReason ?? 'deck-exhausted',
     state.finisherPlayerId ?? null,
   );
+  roundResult.roundNumber = roundNumber;
 
   // Record scores in DB.
   const scoresToRecord = roundResult.playerScores.map((ps) => ({
@@ -206,12 +207,10 @@ async function handleRoundEnd(
   io.to(roomId).emit('game:scores', gameScores);
 
   // Check if the game is over.
-  const winner = getWinner(
-    Object.entries(cumulativeScores).map(([playerId, total]) => ({ playerId, total, rounds: [] })),
-  );
+  const winner = getWinner(cumulativeScores);
 
   if (winner) {
-    await db.rooms.updateStatus(roomId, 'finished', { winnerId: winner.playerId, finishedAt: true });
+    await db.rooms.updateStatus(roomId, 'finished', { winnerId: winner, finishedAt: true });
     await db.rooms.setFinalScores(
       roomId,
       Object.entries(cumulativeScores).map(([userId, finalScore]) => ({ userId, finalScore })),
@@ -223,18 +222,18 @@ async function handleRoundEnd(
 
     await db.scores.recordMatchHistory({
       roomId,
-      winnerId: winner.playerId,
+      winnerId: winner,
       roundsPlayed: roundNumber,
       playerResults: matchPlayers,
     });
 
     await db.scores.updateLeaderboard({
-      winnerId: winner.playerId,
+      winnerId: winner,
       scores: matchPlayers.map(({ userId, finalScore }) => ({ userId, finalScore })),
     });
 
     room.status = 'finished';
-    io.to(roomId).emit('game:finished', { playerId: winner.playerId, finalScore: winner.total });
+    io.to(roomId).emit('game:finished', { playerId: winner, finalScore: cumulativeScores[winner] ?? 0 });
     io.to(roomId).emit('room:updated', toGameRoom(room));
     console.log(`[game] Game finished in room ${roomId}. Winner: ${winner.playerId}`);
     return;
