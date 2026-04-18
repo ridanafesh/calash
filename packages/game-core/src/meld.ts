@@ -113,10 +113,9 @@ function isConsecutiveWithWildcards(sortedRanks: number[], wildcards: number): b
     gapsNeeded += sortedRanks[i] - sortedRanks[i - 1] - 1;
   }
 
-  // Jokers fill interior gaps first; any remainder extends edges.
-  // We need gapsNeeded ≤ wildcards AND totalSlots === span
-  // (totalSlots > span would mean extra jokers that don't fit the run).
-  return gapsNeeded <= wildcards && totalSlots === span;
+  // Jokers fill interior gaps first; any remainder extends an edge position.
+  // e.g. 7-8-Joker is valid as 6-7-8 or 7-8-9 (joker extends an edge).
+  return gapsNeeded <= wildcards;
 }
 
 // ─── Set validation ───────────────────────────────────────────────────────────

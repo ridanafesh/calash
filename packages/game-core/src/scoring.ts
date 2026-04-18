@@ -1,6 +1,6 @@
 import type { PlayerRoundState, RoundResult, PlayerRoundScore, RoundEndReason } from '@calash/shared';
 import { GAME_CONFIG } from '@calash/shared';
-import { totalCardValue, totalMeldValue } from './meld.js';
+import { totalCardValue } from './meld.js';
 
 /**
  * Compute the round score for a single player.
@@ -17,7 +17,7 @@ export function computePlayerRoundScore(
   state: PlayerRoundState,
   finishedFirst: boolean,
 ): PlayerRoundScore {
-  const tableTotal = totalMeldValue(state.melds);
+  const tableTotal = state.tableTotal;
   const handTotal = totalCardValue(state.hand);
   const roundScore = tableTotal - handTotal;
   const finalScore = roundScore + (finishedFirst ? GAME_CONFIG.FINISH_BONUS : 0);

@@ -36,8 +36,24 @@ export function validateTurnAction(action: TurnAction, ctx: TurnContext): Valida
     case 'draw-from-deck':
       return validateDraw(ctx);
 
-    case 'take-from-discard':
-      return validateTakeFromDiscard(ctx.discardPile, action.count, action.returnCardFromHand);
+    case 'take-from-discard': {
+      if (ctx.turnPhase !== 'awaiting-draw-or-take') {
+        return {
+          valid: false,
+          reason: `Cannot take from discard during phase '${ctx.turnPhase}'; must be 'awaiting-draw-or-take'`,
+        };
+      }
+      const pileResult = validateTakeFromDiscard(ctx.discardPile, action.count, action.returnCardFromHand);
+      if (!pileResult.valid) return pileResult;
+      if (action.returnCardFromHand) {
+        const returnCard = action.returnCardFromHand;
+        const inHand = ctx.playerHand.some((c) => isSameCard(c, returnCard));
+        if (!inHand) {
+          return { valid: false, reason: 'returnCardFromHand is not in your hand' };
+        }
+      }
+      return { valid: true };
+    }
 
     case 'go-down':
       return validateGoDown(

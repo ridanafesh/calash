@@ -104,3 +104,14 @@ export type TurnPhase =
 export type RoundEndReason =
   | 'player-finished'  // a player emptied their hand
   | 'deck-exhausted';  // the hidden draw pile ran out
+
+/** Client-visible representation of a game room. */
+export interface GameRoom {
+  id: string;
+  code: string;
+  hostUserId: string;
+  status: GameStatus;
+  maxPlayers: number;
+  playerIds: string[];
+  currentRound: number;
+}

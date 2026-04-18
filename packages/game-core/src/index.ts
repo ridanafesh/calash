@@ -34,3 +34,16 @@ export {
   goDownMinimum,
 } from './rules/index.js';
 export type { TurnContext } from './rules/index.js';
+
+// Engine
+export {
+  initRound,
+  applyTurnAction,
+  toRoundStateView,
+  nextDealerIndex,
+  isRoundOverByExhaustion,
+} from './engine.js';
+export type { ApplyResult } from './engine.js';
+
+// Seeded randomness (for reproducible tests and deterministic replay)
+export { mulberry32, seededShuffle } from './seeded-random.js';
