@@ -1,5 +1,6 @@
 import type {
   AuthResponse,
+  GameRoom,
   GoogleAuthRequest,
   LoginRequest,
   RegisterRequest,
@@ -74,7 +75,29 @@ export const apiClient = {
       headers: authHeaders(),
     }),
 
+  // ── Rooms ─────────────────────────────────────────────────────────────────────
+  getRooms: () =>
+    request<GameRoom[]>('/api/rooms', { headers: authHeaders() }),
+
+  getRoom: (id: string) =>
+    request<GameRoom>(`/api/rooms/${id}`, { headers: authHeaders() }),
+
+  getRoomByCode: (code: string) =>
+    request<GameRoom>(`/api/rooms/join/${code}`, { headers: authHeaders() }),
+
+  // ── Match history ─────────────────────────────────────────────────────────────
+  getMatchHistory: () =>
+    request<MatchHistoryEntry[]>('/api/history', { headers: authHeaders() }),
+
   // ── Health ────────────────────────────────────────────────────────────────────
   health: () =>
     request<{ status: string; db: string }>('/api/health', { headers: authHeaders() }),
 };
+
+export interface MatchHistoryEntry {
+  id: string;
+  roomId: string;
+  finishedAt: string;
+  players: Array<{ userId: string; displayName: string; finalScore: number }>;
+  winnerId: string;
+}
