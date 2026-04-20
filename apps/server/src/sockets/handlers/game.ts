@@ -192,15 +192,25 @@ async function handleRoundEnd(
 
   await db.scores.recordRoundScores({ roundId, roomId, scores: scoresToRecord });
 
-  // Update cumulative scores in memory.
+  // Update cumulative and per-round scores in memory.
+  const roundScores = room.round.roundScores;
   for (const ps of roundResult.playerScores) {
     cumulativeScores[ps.playerId] = (cumulativeScores[ps.playerId] ?? 0) + ps.finalScore;
+    if (!roundScores[ps.playerId]) roundScores[ps.playerId] = [];
+    roundScores[ps.playerId].push(ps.finalScore);
   }
+
+  // Compute next dealer id for the round result overlay.
+  const { nextDealerIndex } = await import('@calash/game-core');
+  const playerCount = room.players.length;
+  const nextDealer = nextDealerIndex(dealerIndex, playerCount);
+  const nextDealerId = room.players[nextDealer]?.userId ?? null;
+  roundResult.nextDealerId = nextDealerId ?? undefined;
 
   const gameScores: GameScore[] = room.players.map((p) => ({
     playerId: p.userId,
     total: cumulativeScores[p.userId] ?? 0,
-    rounds: [],
+    rounds: roundScores[p.userId] ?? [],
   }));
 
   io.to(roomId).emit('game:round-result', roundResult);
@@ -235,14 +245,11 @@ async function handleRoundEnd(
     room.status = 'finished';
     io.to(roomId).emit('game:finished', { playerId: winner, finalScore: cumulativeScores[winner] ?? 0 });
     io.to(roomId).emit('room:updated', toGameRoom(room));
-    console.log(`[game] Game finished in room ${roomId}. Winner: ${winner.playerId}`);
+    console.log(`[game] Game finished in room ${roomId}. Winner: ${winner}`);
     return;
   }
 
-  // Start next round.
-  const { nextDealerIndex } = await import('@calash/game-core');
-  const playerCount = room.players.length;
-  const nextDealer = nextDealerIndex(dealerIndex, playerCount);
+  // Start next round (nextDealer already computed above).
 
   room.round = {
     ...room.round,
@@ -250,6 +257,7 @@ async function handleRoundEnd(
     dealerIndex: nextDealer,
     state: room.round.state, // will be replaced by startGame
     cumulativeScores,
+    roundScores: room.round.roundScores,
   };
 
   // Reset ready states for next round.

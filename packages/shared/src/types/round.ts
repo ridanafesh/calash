@@ -126,6 +126,8 @@ export interface RoundResult {
   endReason: RoundEndReason;
   finisherPlayerId: string | null;
   playerScores: PlayerRoundScore[];
+  /** UserId of the player who will deal the next round. */
+  nextDealerId?: string;
 }
 
 // ─── Game-level score tracking ───────────────────────────────────────────────

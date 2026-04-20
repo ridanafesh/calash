@@ -468,6 +468,11 @@ export function GameBoard() {
                 ))}
               </>
             )}
+            {roundResult.nextDealerId && (
+              <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', textAlign: 'center', marginTop: 4 }}>
+                Next dealer: <strong style={{ color: 'var(--text-primary)' }}>{roundResult.nextDealerId}</strong>
+              </div>
+            )}
             <button className="btn btn-primary" style={{ marginTop: 12 }} onClick={clearRoundResult}>
               Continue
             </button>

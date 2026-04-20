@@ -14,6 +14,8 @@ export interface ActiveRound {
   dealerIndex: number;
   state: RoundState;
   cumulativeScores: Record<string, number>;
+  /** Per-player list of finalScore values, one entry per completed round. */
+  roundScores: Record<string, number[]>;
 }
 
 export interface RoomState {

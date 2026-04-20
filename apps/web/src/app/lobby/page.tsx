@@ -111,8 +111,9 @@ function LobbyInner() {
         )}
 
         <div className="row" style={{ marginTop: '2rem', gap: 20, justifyContent: 'center' }}>
-          <Link href="/scores" style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Scores</Link>
+          <Link href="/leaderboard" style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Leaderboard</Link>
           <Link href="/history" style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>History</Link>
+          <Link href="/scores" style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Scores</Link>
           <Link href="/profile" style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Profile</Link>
         </div>
       </div>

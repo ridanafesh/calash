@@ -85,19 +85,100 @@ export const apiClient = {
   getRoomByCode: (code: string) =>
     request<GameRoom>(`/api/rooms/join/${code}`, { headers: authHeaders() }),
 
+  // ── Score breakdown ───────────────────────────────────────────────────────────
+  getRoomScores: (roomId: string) =>
+    request<RoomScoreSummary>(`/api/scores/rooms/${roomId}`, { headers: authHeaders() }),
+
+  // ── Leaderboard ───────────────────────────────────────────────────────────────
+  getLeaderboard: (params?: { sort?: 'score' | 'wins' | 'winrate'; limit?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.sort) qs.set('sort', params.sort);
+    if (params?.limit) qs.set('limit', String(params.limit));
+    const q = qs.toString();
+    return request<LeaderboardEntry[]>(`/api/leaderboard${q ? `?${q}` : ''}`, { headers: authHeaders() });
+  },
+
   // ── Match history ─────────────────────────────────────────────────────────────
-  getMatchHistory: () =>
-    request<MatchHistoryEntry[]>('/api/history', { headers: authHeaders() }),
+  getMatchHistory: (params?: { before?: string; limit?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.before) qs.set('before', params.before);
+    if (params?.limit) qs.set('limit', String(params.limit));
+    const q = qs.toString();
+    return request<MatchHistoryEntry[]>(`/api/history${q ? `?${q}` : ''}`, { headers: authHeaders() });
+  },
+
+  getMatchDetail: (matchId: string) =>
+    request<MatchDetail>(`/api/history/${matchId}`, { headers: authHeaders() }),
 
   // ── Health ────────────────────────────────────────────────────────────────────
   health: () =>
     request<{ status: string; db: string }>('/api/health', { headers: authHeaders() }),
 };
 
+// ── API response types ────────────────────────────────────────────────────────
+
+export interface RoundScoreEntry {
+  userId: string;
+  displayName: string;
+  tableTotal: number;
+  handTotal: number;
+  roundScore: number;
+  finishBonus: number;
+  finalScore: number;
+  cumulativeAfter: number;
+}
+
+export interface RoundSummary {
+  roundId: string;
+  roundNumber: number;
+  dealerId: string;
+  dealerName: string | null;
+  endReason: string;
+  finisherId: string | null;
+  finisherName: string | null;
+  nextDealerId: string | null;
+  nextDealerName: string | null;
+  finishedAt: string | null;
+  scores: RoundScoreEntry[];
+}
+
+export interface RoomScoreSummary {
+  roomId: string;
+  status: string;
+  inviteCode: string | null;
+  winnerId: string | null;
+  winnerName: string | null;
+  finishedAt: string | null;
+  rounds: RoundSummary[];
+  cumulative: Array<{ userId: string; displayName: string; total: number }>;
+}
+
+export interface LeaderboardEntry {
+  rank: number;
+  userId: string;
+  displayName: string;
+  avatarUrl: string | null;
+  gamesPlayed: number;
+  gamesWon: number;
+  totalScore: number;
+  highestRoundScore: number;
+  winRate: number;
+  updatedAt: string;
+}
+
 export interface MatchHistoryEntry {
   id: string;
   roomId: string;
-  finishedAt: string;
-  players: Array<{ userId: string; displayName: string; finalScore: number }>;
-  winnerId: string;
+  inviteCode: string | null;
+  winnerId: string | null;
+  winnerName: string | null;
+  roundsPlayed: number;
+  finishedAt: string | null;
+  myRank: number | null;
+  myFinalScore: number | null;
+  players: Array<{ userId: string; displayName: string; finalScore: number; rank: number }>;
+}
+
+export interface MatchDetail extends MatchHistoryEntry {
+  rounds: RoundSummary[];
 }

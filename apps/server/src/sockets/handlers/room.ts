@@ -437,6 +437,7 @@ async function startGame(room: RoomState, io: CalashServer): Promise<void> {
     dealerIndex,
     state: roundState,
     cumulativeScores: Object.fromEntries(playerIds.map((id) => [id, 0])),
+    roundScores: Object.fromEntries(playerIds.map((id) => [id, []])),
   };
 
   io.to(room.roomId).emit('room:updated', toGameRoom(room));
