@@ -201,6 +201,20 @@ async function seed(): Promise<void> {
 
     console.log('✓ Seeded product catalogue (3 products, disabled — set is_active=true to enable)');
 
+    // ── Wallet balances ───────────────────────────────────────────────────────
+    // Give each test user a starting coin balance so commerce features can be
+    // exercised locally without requiring a real payment flow.
+    for (const u of USERS) {
+      await pool.query(
+        `INSERT INTO wallet_balances (user_id, currency, balance)
+         VALUES ($1, 'coins', 1000)
+         ON CONFLICT ON CONSTRAINT uq_wallet_user_currency DO NOTHING`,
+        [u.id],
+      );
+    }
+
+    console.log('✓ Seeded wallet balances (1000 coins each — coins currency)');
+
     console.log('\nSeed complete. Local dev credentials:');
     console.log('  alice@dev.local / password123');
     console.log('  bob@dev.local   / password123');
