@@ -142,6 +142,65 @@ async function seed(): Promise<void> {
     }
 
     console.log(`✓ Seeded active room (id: ${ACTIVE_ROOM_ID}, round 1 in progress)`);
+
+    // ── Product catalogue (commerce, all inactive by default) ─────────────────
+    const PRODUCTS = [
+      {
+        id: '30000000-0000-0000-0000-000000000001',
+        name: 'Classic Card Pack',
+        description: 'A set of classic card back designs (5 styles)',
+        product_type: 'cosmetic',
+      },
+      {
+        id: '30000000-0000-0000-0000-000000000002',
+        name: 'Neon Card Pack',
+        description: 'Vivid neon card back designs (5 styles)',
+        product_type: 'cosmetic',
+      },
+      {
+        id: '30000000-0000-0000-0000-000000000003',
+        name: 'Calash Premium Monthly',
+        description: 'Unlock exclusive cosmetics and no-ads experience',
+        product_type: 'subscription',
+      },
+    ] as const;
+
+    for (const p of PRODUCTS) {
+      await pool.query(
+        `INSERT INTO products (id, name, description, product_type, is_active)
+         VALUES ($1, $2, $3, $4, false)
+         ON CONFLICT (id) DO NOTHING`,
+        [p.id, p.name, p.description, p.product_type],
+      );
+    }
+
+    // Product prices per platform (amounts in USD cents)
+    const PRICES = [
+      // Classic Card Pack
+      { product_id: PRODUCTS[0].id, platform: 'web_paypal',   currency: 'USD', amount_cents: 299 },
+      { product_id: PRODUCTS[0].id, platform: 'ios_iap',      currency: 'USD', amount_cents: 299, external_product_id: 'com.calash.cosmetic.classic' },
+      { product_id: PRODUCTS[0].id, platform: 'android_iap',  currency: 'USD', amount_cents: 299, external_product_id: 'com.calash.cosmetic.classic' },
+      // Neon Card Pack
+      { product_id: PRODUCTS[1].id, platform: 'web_paypal',   currency: 'USD', amount_cents: 299 },
+      { product_id: PRODUCTS[1].id, platform: 'ios_iap',      currency: 'USD', amount_cents: 299, external_product_id: 'com.calash.cosmetic.neon' },
+      { product_id: PRODUCTS[1].id, platform: 'android_iap',  currency: 'USD', amount_cents: 299, external_product_id: 'com.calash.cosmetic.neon' },
+      // Premium Monthly
+      { product_id: PRODUCTS[2].id, platform: 'web_paypal',   currency: 'USD', amount_cents: 499 },
+      { product_id: PRODUCTS[2].id, platform: 'ios_iap',      currency: 'USD', amount_cents: 499, external_product_id: 'com.calash.premium.monthly' },
+      { product_id: PRODUCTS[2].id, platform: 'android_iap',  currency: 'USD', amount_cents: 499, external_product_id: 'com.calash.premium.monthly' },
+    ] as const;
+
+    for (const pr of PRICES) {
+      await pool.query(
+        `INSERT INTO product_prices (product_id, platform, currency, amount_cents, external_product_id, is_active)
+         VALUES ($1, $2, $3, $4, $5, false)
+         ON CONFLICT DO NOTHING`,
+        [pr.product_id, pr.platform, pr.currency, pr.amount_cents, (pr as { external_product_id?: string }).external_product_id ?? null],
+      );
+    }
+
+    console.log('✓ Seeded product catalogue (3 products, disabled — set is_active=true to enable)');
+
     console.log('\nSeed complete. Local dev credentials:');
     console.log('  alice@dev.local / password123');
     console.log('  bob@dev.local   / password123');

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 
 import authRouter from './auth.js';
+import commerceRouter from './commerce.js';
 import healthRouter from './health.js';
 import historyRouter from './history.js';
 import leaderboardRouter from './leaderboard.js';
@@ -17,5 +18,6 @@ router.use('/api', roomsRouter);
 router.use('/api', scoresRouter);
 router.use('/api', leaderboardRouter);
 router.use('/api', historyRouter);
+router.use('/api', commerceRouter);
 
 export default router;
