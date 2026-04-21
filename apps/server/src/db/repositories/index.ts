@@ -12,7 +12,10 @@ export type { GameRoomRow, GameRoomPlayerRow, RoomWithPlayers } from './room.rep
 export type { GameRoundRow, RoundHandRow, GameMoveRow, RoundDiscardRow } from './round.repository.js';
 export type { GameMeldRow, GameMeldCardRow } from './meld.repository.js';
 export type { GameScoreRow, LeaderboardEntryRow, MatchHistoryRow } from './score.repository.js';
-export type { ProductRow, ProductPriceRow, OrderRow, PaymentRow, InventoryItemRow } from './commerce.repository.js';
+export type {
+  ProductRow, ProductPriceRow, OrderRow, PaymentRow, InventoryItemRow,
+  PurchaseHistoryRow, WalletRow, WalletTransactionRow,
+} from './commerce.repository.js';
 
 import { UserRepository } from './user.repository.js';
 import { RoomRepository } from './room.repository.js';
