@@ -7,9 +7,25 @@ import type { TurnAction } from './actions.js';
 // These interfaces are the ONLY place where game-domain types touch the
 // transport layer.  Game-core validation logic never imports from this file.
 
+/** Options accepted by the `room:create` event. */
+export interface RoomCreateOptions {
+  maxPlayers: number;
+  /**
+   * If true, the room is created and immediately filled with bots up to
+   * maxPlayers, all bots are auto-readied, and the game starts as soon
+   * as the host marks ready.  Used for "Play vs Computer" single-player.
+   */
+  fillWithBots?: boolean;
+  /**
+   * Difficulty for any bots added at creation time and any bots added
+   * later via `room:add-bot` from this host.  Defaults to 'easy'.
+   */
+  botDifficulty?: import('./game.js').BotDifficulty;
+}
+
 /** Events the client sends to the server. */
 export interface ClientToServerEvents {
-  'room:create': (options: { maxPlayers: number }) => void;
+  'room:create': (options: RoomCreateOptions) => void;
   /** Join by UUID room ID (for links / REST lookup). */
   'room:join': (roomId: string) => void;
   /** Join by 6-character invite code. */
@@ -17,6 +33,16 @@ export interface ClientToServerEvents {
   'room:leave': () => void;
   /** Toggle the calling player's ready state. */
   'room:ready': () => void;
+  /**
+   * Host-only: add a single bot to the current room. Server rejects if the
+   * caller is not the host, the room is full, or the game has already started.
+   */
+  'room:add-bot': (options?: { difficulty?: import('./game.js').BotDifficulty }) => void;
+  /**
+   * Host-only: remove a bot from the current room (by userId). Cannot remove
+   * humans this way; humans must leave themselves.
+   */
+  'room:remove-bot': (botUserId: string) => void;
 
   /**
    * Submit a turn action.  The server validates the action with game-core

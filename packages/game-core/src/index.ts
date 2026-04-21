@@ -47,3 +47,7 @@ export type { ApplyResult } from './engine.js';
 
 // Seeded randomness (for reproducible tests and deterministic replay)
 export { mulberry32, seededShuffle } from './seeded-random.js';
+
+// Bot decision engine
+export { chooseBotAction, chooseEasyAction } from './bot/index.js';
+export type { BotContext, ChooseEasyOptions } from './bot/index.js';

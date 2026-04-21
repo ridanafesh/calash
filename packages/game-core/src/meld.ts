@@ -16,21 +16,30 @@ function nonJokers(cards: readonly Card[]): RegularCard[] {
 /**
  * Validate a sequence meld.
  *
- * Rules (from RULES.md):
+ * Rules:
  *   - ≥ 3 cards total (including jokers).
+ *   - No upper cap below the natural max of 14 (A,2,...,K,A — both Aces of
+ *     the same suit forming a single full-suit run).
  *   - All non-joker cards must share the same suit.
  *   - At most 1 joker.
  *   - Cards form a consecutive rank run with no gaps beyond what jokers fill.
- *   - Ace may be low (rank 1, as in A-2-3) or high (rank 14, as in Q-K-A).
- *   - Circular wraps (K-A-2) are NOT allowed — Ace cannot be both 1 and 14
- *     in the same sequence.
+ *   - Ace may be used low (rank 1, as in A-2-3) or high (rank 14, as in Q-K-A).
+ *   - With two Aces of the same suit, BOTH may appear in the same sequence:
+ *     one as low at the start and one as high at the end (A,2,...,K,A).
+ *     Otherwise two Aces in the same sequence is illegal.
+ *   - Circular wraps (K-A-2) are NOT allowed — a single Ace cannot be both
+ *     1 and 14 within a single meld.
  *
- * Implementation detail:
- *   We try two interpretations of any Ace present (as 1 and as 14) and accept
- *   the sequence if either interpretation yields a valid consecutive run.
- *   The "circular wrap" case (K-A-2) fails naturally because treating Ace as
- *   1 gives [1, 2, 13] (not consecutive) and as 14 gives [2, 13, 14]
- *   (not consecutive).
+ * Implementation:
+ *   Enumerate the legal Ace-value assignments and accept if any assignment
+ *   yields a valid consecutive run with no duplicate ranks.
+ *     - 0 Aces: one interpretation (no Ace value to assign).
+ *     - 1 Ace:  two interpretations — Ace=1 OR Ace=14.
+ *     - 2 Aces: ONE interpretation — Ace=1 AND Ace=14 (both used).
+ *               Two Aces both played as low (or both as high) is impossible
+ *               because that would put two cards at the same rank position.
+ *     - 3+ Aces: impossible in a single same-suit sequence (the deck only
+ *               has 2 of each suit), so reject up front.
  */
 function validateSequence(cards: readonly Card[]): ValidationResult {
   if (cards.length < MELD_CONFIG.MIN_SEQUENCE_LENGTH) {
@@ -54,17 +63,23 @@ function validateSequence(cards: readonly Card[]): ValidationResult {
   const others = regulars.filter((c) => c.rank !== 'A');
   const otherRanks = others.map((c) => RANK_ORDER[c.rank] ?? 0).sort((a, b) => a - b);
 
-  // If there is an Ace, try both ACE_LOW and ACE_HIGH interpretations.
-  // If there is no Ace, there is only one interpretation.
-  const aceInterpretations: Array<number | null> = aces.length > 0
-    ? [ACE_LOW, ACE_HIGH]
-    : [null];
+  // Enumerate the rank-value lists implied by each legal Ace assignment.
+  // Each entry is the full sorted list of ranks the sequence must cover.
+  let aceAssignments: number[][];
+  if (aces.length === 0) {
+    aceAssignments = [[]];
+  } else if (aces.length === 1) {
+    aceAssignments = [[ACE_LOW], [ACE_HIGH]];
+  } else if (aces.length === 2) {
+    aceAssignments = [[ACE_LOW, ACE_HIGH]];
+  } else {
+    // 3+ Aces of the same suit can't exist in a 2-deck game; even if it
+    // somehow arose, no consecutive run can place 3 Aces.
+    return invalid('A sequence may contain at most 2 Aces (one low, one high)');
+  }
 
-  for (const aceValue of aceInterpretations) {
-    const allRanks = aceValue !== null
-      ? [...otherRanks, aceValue].sort((a, b) => a - b)
-      : [...otherRanks];
-
+  for (const aceValues of aceAssignments) {
+    const allRanks = [...otherRanks, ...aceValues].sort((a, b) => a - b);
     if (isConsecutiveWithWildcards(allRanks, jokerCount)) {
       return { valid: true };
     }

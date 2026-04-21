@@ -44,6 +44,7 @@ router.get('/leaderboard', async (req, res, next) => {
        FROM leaderboard_entries le
        JOIN player_profiles pp ON pp.user_id = le.user_id
        JOIN users u ON u.id = le.user_id
+       WHERE u.is_bot = false
        ORDER BY ${orderBy}
        LIMIT $1`,
       [limit],

@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import type { Server, Socket } from 'socket.io';
 import type {
   ClientToServerEvents,
@@ -11,7 +12,8 @@ import { GAME_CONFIG } from '@calash/shared';
 
 import { pool } from '../../db/index.js';
 import { createDatabaseService } from '../../db/repositories/index.js';
-import { roomStore } from '../../store/index.js';
+import { roomStore, type RoomState } from '../../store/index.js';
+import { decideBotAction } from '../../services/bot.service.js';
 import { startGame, toGameRoom, broadcastRoomUpdate } from './room.js';
 
 type CalashSocket = Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
@@ -25,6 +27,31 @@ type DbTurnPhase = 'awaiting_draw_or_take' | 'holding' | 'complete';
 
 function mapTurnPhaseToDb(phase: string): DbTurnPhase {
   return phase.replace(/-/g, '_') as DbTurnPhase;
+}
+
+/**
+ * Map a pg / DB error into a user-facing message. We deliberately do not
+ * leak internal SQL, but we do surface the common mistake cases so the
+ * player gets an actionable banner instead of "Internal server error".
+ */
+function friendlyPersistenceError(err: unknown, actionType: string): string {
+  if (err && typeof err === 'object' && 'code' in err) {
+    const code = (err as { code?: string }).code;
+    // Postgres "invalid text representation" (22P02) — e.g. bad UUID. This
+    // was the original smoking gun: the engine generated base36 ids while
+    // the DB column is UUID. Keep the message stable for the UI banner.
+    if (code === '22P02') {
+      return `Could not save your ${actionType} action — server state mismatch. Try refreshing the page.`;
+    }
+    // Foreign key violation: referenced meld/round/user no longer exists.
+    if (code === '23503') {
+      return `Could not save your ${actionType} action — referenced record no longer exists.`;
+    }
+  }
+  if (err instanceof Error && err.message.startsWith('Meld ') && err.message.endsWith(' not found')) {
+    return err.message;
+  }
+  return `Could not save your ${actionType} action. Please try again.`;
 }
 
 // ─── game:action ──────────────────────────────────────────────────────────────
@@ -47,70 +74,186 @@ export async function handleGameAction(
     return;
   }
 
-  const { applyTurnAction, toRoundStateView } = await import('@calash/game-core');
-
-  const { roundId, state, cumulativeScores } = room.round;
-  const ps = state.playerStates[playerId];
-  if (!ps) {
-    socket.emit('room:error', { code: 'NOT_IN_GAME', message: 'You are not a participant in this round.' });
+  // Reject if a bot tries to come through this entry point — bot actions are
+  // only ever invoked via the internal driver, never from a socket.
+  const slot = room.players.find((p) => p.userId === playerId);
+  if (slot?.isBot) {
+    socket.emit('room:error', { code: 'BOT_ACTION', message: 'Bot actions cannot be submitted manually.' });
     return;
   }
 
-  const handBefore = [...ps.hand];
-
-  const result = applyTurnAction(state, playerId, action);
-
+  const result = await applyPlayerAction(room, playerId, action, io);
   if (!result.ok) {
     socket.emit('room:error', { code: 'INVALID_ACTION', message: result.error });
-    console.warn(`[game] Invalid action by ${playerId} in round ${roundId}: ${result.error}`);
     return;
+  }
+  // Send the actor's private hand directly to their socket.
+  socket.emit('game:hand', result.handAfter);
+
+  if (result.roundEnded) return; // handleRoundEnd already ran
+
+  // Drive bots if the next turn belongs to one.
+  scheduleBotIfNeeded(roomId, io);
+}
+
+/**
+ * Shared action-apply pipeline used by both human socket handlers and the bot
+ * driver. Returns {ok, handAfter, roundEnded} on success or {ok: false, error}
+ * on failure. Broadcasts game:state to the whole room and persists everything
+ * to the database. Does NOT send game:hand — callers do that with the right
+ * target socket (or skip it for bots, who have no socket).
+ */
+async function applyPlayerAction(
+  room: RoomState,
+  playerId: string,
+  action: TurnAction,
+  io: CalashServer,
+): Promise<
+  | { ok: true; handAfter: import('@calash/shared').Card[]; roundEnded: boolean }
+  | { ok: false; error: string }
+> {
+  if (!room.round) return { ok: false, error: 'No active round.' };
+  const { applyTurnAction, toRoundStateView } = await import('@calash/game-core');
+  const { roundId, state } = room.round;
+
+  const ps = state.playerStates[playerId];
+  if (!ps) return { ok: false, error: 'You are not a participant in this round.' };
+
+  const handBefore = [...ps.hand];
+  // Use real UUIDs for meld IDs so the in-memory id matches the DB
+  // primary key. Without this, add-to-meld fails because the DB rejects the
+  // engine's short base36 ids as invalid UUIDs.
+  const result = applyTurnAction(state, playerId, action, () => randomUUID());
+  if (!result.ok) {
+    console.warn(`[game] Invalid action by ${playerId} in round ${roundId}: ${result.error}`);
+    return { ok: false, error: result.error };
   }
 
   const { state: newState, roundResult } = result;
-
-  // ── Persist action to DB ──────────────────────────────────────────────────
-
   const newPs = newState.playerStates[playerId];
 
-  const actionUpdates: Parameters<typeof db.rounds.applyAction>[0] = {
-    roundId,
-    userId: playerId,
-    action,
-    handBefore,
-    handAfter: newPs.hand,
-    newDeck: newState.hiddenDeck,
-    newPile: newState.discardPile,
-    newTurnPhase: mapTurnPhaseToDb(newState.turnPhase),
-    nextTurnUserId: newState.currentTurnPlayerId,
-    didTakeFromDiscard: newState.didTakeFromDiscardThisTurn,
-    highestTableTotal: newState.highestTableTotal,
-  };
-
-  await db.rounds.applyAction(actionUpdates);
-
-  // Sync hand metadata (has_gone_down, table_total) and melds for meld actions.
-  if (['go-down', 'add-to-meld', 'add-new-meld'].includes(action.type)) {
-    await db.rounds.updateHand(roundId, playerId, {
-      cards: newPs.hand,
-      hasGoneDown: newPs.hasGoneDown,
-      tableTotal: newPs.tableTotal,
+  // Persist to DB. If any write fails we leave the in-memory state UNMUTATED
+  // (it's still `state`, not `newState`), so the game is consistent — the
+  // caller sees the DB error as a validation-style failure instead of the
+  // client seeing a generic "Internal server error" with no information.
+  try {
+    await db.rounds.applyAction({
+      roundId,
+      userId: playerId,
+      action,
+      handBefore,
+      handAfter: newPs.hand,
+      newDeck: newState.hiddenDeck,
+      newPile: newState.discardPile,
+      newTurnPhase: mapTurnPhaseToDb(newState.turnPhase),
+      nextTurnUserId: newState.currentTurnPlayerId,
+      didTakeFromDiscard: newState.didTakeFromDiscardThisTurn,
+      highestTableTotal: newState.highestTableTotal,
     });
-    await persistMelds(roundId, playerId, action, newPs);
+
+    if (['go-down', 'add-to-meld', 'add-new-meld'].includes(action.type)) {
+      await db.rounds.updateHand(roundId, playerId, {
+        cards: newPs.hand,
+        hasGoneDown: newPs.hasGoneDown,
+        tableTotal: newPs.tableTotal,
+      });
+      await persistMelds(roundId, playerId, action, newPs);
+    }
+  } catch (err) {
+    console.error(`[game] DB persistence failed for ${action.type} by ${playerId} in round ${roundId}:`, err);
+    return {
+      ok: false,
+      error: friendlyPersistenceError(err, action.type),
+    };
   }
 
-  // ── Update in-memory state ────────────────────────────────────────────────
-
   room.round.state = newState;
-
-  // ── Broadcast ─────────────────────────────────────────────────────────────
-
-  io.to(roomId).emit('game:state', toRoundStateView(newState));
-  socket.emit('game:hand', newPs.hand);
-
-  // ── Handle round end ──────────────────────────────────────────────────────
+  io.to(room.roomId).emit('game:state', toRoundStateView(newState));
 
   if (roundResult) {
     await handleRoundEnd(room.roomId, io);
+    return { ok: true, handAfter: newPs.hand, roundEnded: true };
+  }
+
+  return { ok: true, handAfter: newPs.hand, roundEnded: false };
+}
+
+// ─── Bot turn driver ─────────────────────────────────────────────────────────
+//
+// When the current turn belongs to a bot, schedule one bot action after a short
+// "thinking" delay. The bot may need multiple actions to finish its turn (e.g.
+// take-from-discard → go-down → discard), so after each bot action we re-check
+// and schedule again until the turn passes to a human or the round ends.
+//
+// Concurrency: one bot timer per room at a time, tracked in a Map. If a timer
+// is already pending, scheduleBotIfNeeded is a no-op.
+
+const BOT_THINKING_MS = 1200;
+const botTimers = new Map<string, NodeJS.Timeout>();
+
+export function scheduleBotIfNeeded(roomId: string, io: CalashServer): void {
+  const room = roomStore.get(roomId);
+  if (!room?.round) return;
+  if (botTimers.has(roomId)) return; // already scheduled
+
+  const currentTurnPlayerId = room.round.state.currentTurnPlayerId;
+  const slot = room.players.find((p) => p.userId === currentTurnPlayerId);
+  if (!slot?.isBot) return;
+
+  const timer = setTimeout(() => {
+    botTimers.delete(roomId);
+    void runBotAction(roomId, io).catch((err) => {
+      console.error(`[bot] Failed to run bot action in room ${roomId}:`, err);
+    });
+  }, BOT_THINKING_MS);
+  botTimers.set(roomId, timer);
+}
+
+async function runBotAction(roomId: string, io: CalashServer): Promise<void> {
+  const room = roomStore.get(roomId);
+  if (!room?.round) return;
+
+  const playerId = room.round.state.currentTurnPlayerId;
+  const slot = room.players.find((p) => p.userId === playerId);
+  if (!slot?.isBot) return; // Turn moved to a human while the timer was pending.
+
+  const difficulty = slot.botDifficulty ?? 'easy';
+  let action: TurnAction;
+  try {
+    action = decideBotAction(difficulty, room.round.state, playerId);
+  } catch (err) {
+    console.error(`[bot] decideBotAction threw for ${playerId} in ${roomId}:`, err);
+    // Fail safe: have the bot draw from the deck so the game doesn't lock up.
+    action = { type: 'draw-from-deck' };
+  }
+
+  const result = await applyPlayerAction(room, playerId, action, io);
+  if (!result.ok) {
+    console.error(`[bot] Bot ${playerId} produced invalid action ${action.type}: ${result.error}`);
+    // Fail safe: discard the highest-value card to end the turn.
+    const ps = room.round?.state.playerStates[playerId];
+    if (ps && ps.hand.length > 0 && room.round?.state.turnPhase === 'holding') {
+      await applyPlayerAction(room, playerId, { type: 'discard', card: ps.hand[0] }, io);
+    }
+  }
+
+  // If the round ended, handleRoundEnd reset the round to lobby and scheduled
+  // the next round; nothing to schedule from here.
+  if (result.ok && result.roundEnded) return;
+
+  // Re-schedule if it's still a bot's turn (same bot or another bot in seat).
+  scheduleBotIfNeeded(roomId, io);
+}
+
+/**
+ * Cancel any pending bot timer for a room. Called when a room is deleted or
+ * the game ends so we don't fire timers against stale state.
+ */
+export function cancelBotTimer(roomId: string): void {
+  const t = botTimers.get(roomId);
+  if (t) {
+    clearTimeout(t);
+    botTimers.delete(roomId);
   }
 }
 
@@ -123,11 +266,13 @@ async function persistMelds(
   ps: import('@calash/shared').PlayerRoundState,
 ): Promise<void> {
   if (action.type === 'go-down') {
-    // createMelds handles meld insert + game_meld_cards in one transaction.
+    // Pass the engine-assigned UUIDs so the DB primary key matches the
+    // in-memory id. Otherwise subsequent add-to-meld fails with a pg
+    // "invalid input syntax for type uuid" error because the ids diverge.
     await db.melds.createMelds({
       roundId,
       ownerUserId: userId,
-      melds: ps.melds.map((m) => ({ type: m.type, cards: [...m.cards] })),
+      melds: ps.melds.map((m) => ({ id: m.id, type: m.type, cards: [...m.cards] })),
       newHand: ps.hand,
       newTableTotal: ps.tableTotal,
     });
@@ -137,7 +282,7 @@ async function persistMelds(
       await db.melds.createMelds({
         roundId,
         ownerUserId: userId,
-        melds: [{ type: meld.type, cards: [...meld.cards] }],
+        melds: [{ id: meld.id, type: meld.type, cards: [...meld.cards] }],
         newHand: ps.hand,
         newTableTotal: ps.tableTotal,
       });
@@ -164,7 +309,7 @@ async function handleRoundEnd(
   if (!room?.round) return;
 
   const { state, roundId, roundNumber, dealerIndex, cumulativeScores } = room.round;
-  const { computeRoundResult, applyCumulativeScores, getWinner } = await import('@calash/game-core');
+  const { computeRoundResult, getWinner } = await import('@calash/game-core');
 
   const roundResult = computeRoundResult(
     state.playerStates,

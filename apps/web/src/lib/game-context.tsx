@@ -11,7 +11,9 @@ import {
 import { io } from 'socket.io-client';
 import type { Socket } from 'socket.io-client';
 import type {
+  BotDifficulty,
   GameRoom,
+  RoomCreateOptions,
   RoundStateView,
   RoundResult,
   GameScore,
@@ -33,11 +35,13 @@ interface GameContextValue {
   scores: GameScore[];
   roundResult: RoundResult | null;
   winner: { playerId: string; finalScore: number } | null;
-  createRoom: (maxPlayers: number) => void;
+  createRoom: (options: RoomCreateOptions) => void;
   joinRoom: (roomId: string) => void;
   joinByCode: (code: string) => void;
   leaveRoom: () => void;
   toggleReady: () => void;
+  addBot: (difficulty?: BotDifficulty) => void;
+  removeBot: (botUserId: string) => void;
   submitAction: (action: TurnAction) => void;
   clearError: () => void;
   clearRoundResult: () => void;
@@ -72,8 +76,21 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     const s = io(wsUrl, { auth: { token }, reconnectionAttempts: 10 }) as CalashSocket;
     socketRef.current = s;
 
-    s.on('connect', () => setConnected(true));
+    s.on('connect', () => {
+      setConnected(true);
+      setRoomError(null);
+    });
     s.on('disconnect', () => setConnected(false));
+    s.on('connect_error', (err: Error) => {
+      setConnected(false);
+      setRoomError({
+        code: 'SOCKET_CONNECT_ERROR',
+        message:
+          err.message === 'Authentication required' || err.message === 'Invalid token'
+            ? 'Your session has expired. Please sign in again.'
+            : `Cannot reach game server (${err.message}).`,
+      });
+    });
     s.on('room:updated', setRoom);
     s.on('room:error', setRoomError);
     s.on('game:state', setGameState);
@@ -89,8 +106,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     };
   }, [token]);
 
-  const createRoom = useCallback((maxPlayers: number) => {
-    socketRef.current?.emit('room:create', { maxPlayers });
+  const createRoom = useCallback((options: RoomCreateOptions) => {
+    socketRef.current?.emit('room:create', options);
   }, []);
 
   const joinRoom = useCallback((roomId: string) => {
@@ -115,6 +132,14 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     socketRef.current?.emit('room:ready');
   }, []);
 
+  const addBot = useCallback((difficulty: BotDifficulty = 'easy') => {
+    socketRef.current?.emit('room:add-bot', { difficulty });
+  }, []);
+
+  const removeBot = useCallback((botUserId: string) => {
+    socketRef.current?.emit('room:remove-bot', botUserId);
+  }, []);
+
   const submitAction = useCallback((action: TurnAction) => {
     socketRef.current?.emit('game:action', action);
   }, []);
@@ -135,6 +160,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         joinByCode,
         leaveRoom,
         toggleReady,
+        addBot,
+        removeBot,
         submitAction,
         clearError: () => setRoomError(null),
         clearRoundResult: () => setRoundResult(null),

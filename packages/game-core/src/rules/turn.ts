@@ -101,6 +101,15 @@ function validateAddToMeld(
   if (!ctx.hasGoneDown) {
     return { valid: false, reason: 'You must go down before adding cards to melds on the table' };
   }
+  // Same restriction as go-down: the player must wait until next turn after
+  // taking from the discard pile. Otherwise a player could grab a high-value
+  // pile and immediately dump everything onto melds in the same turn.
+  if (ctx.didTakeFromDiscardThisTurn) {
+    return {
+      valid: false,
+      reason: 'Cannot add to a meld on the same turn you took from the discard pile',
+    };
+  }
 
   const meld = ctx.tableMelds[meldId];
   if (!meld) {
@@ -133,6 +142,12 @@ function validateAddNewMeld(
   }
   if (!ctx.hasGoneDown) {
     return { valid: false, reason: 'You must go down before placing additional melds' };
+  }
+  if (ctx.didTakeFromDiscardThisTurn) {
+    return {
+      valid: false,
+      reason: 'Cannot place a new meld on the same turn you took from the discard pile',
+    };
   }
 
   // Verify hand ownership

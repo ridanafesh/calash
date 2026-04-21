@@ -105,12 +105,19 @@ export type RoundEndReason =
   | 'player-finished'  // a player emptied their hand
   | 'deck-exhausted';  // the hidden draw pile ran out
 
+/** Difficulty levels for bot players. Architecture is open to additional levels. */
+export type BotDifficulty = 'easy';
+
 /** A player slot within a room lobby or active game. */
 export interface RoomPlayer {
   userId: string;
   displayName: string;
   isReady: boolean;
   isConnected: boolean;
+  /** True for bot players. Bots are always considered ready and connected. */
+  isBot: boolean;
+  /** Set when isBot is true. Indicates which strategy the bot uses. */
+  botDifficulty?: BotDifficulty;
 }
 
 /** Client-visible representation of a game room. */

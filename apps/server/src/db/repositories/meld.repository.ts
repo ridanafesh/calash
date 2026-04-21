@@ -61,11 +61,17 @@ export class MeldRepository {
   /**
    * Insert multiple melds in a single transaction (go-down action).
    * Also updates the player's hand, has_gone_down flag, and table_total.
+   *
+   * Each meld may specify an explicit `id` so that the DB primary key
+   * matches the engine's in-memory meld id. The engine assigns UUIDs via
+   * the id generator passed to applyTurnAction, so subsequent add-to-meld
+   * lookups by that id find the correct DB row. When `id` is omitted the
+   * column default (gen_random_uuid()) is used.
    */
   async createMelds(data: {
     roundId: string;
     ownerUserId: string;
-    melds: Array<{ type: MeldType; cards: Card[] }>;
+    melds: Array<{ id?: string; type: MeldType; cards: Card[] }>;
     newHand: Card[];
     newTableTotal: number;
   }): Promise<GameMeldRow[]> {
@@ -78,11 +84,17 @@ export class MeldRepository {
       for (const meld of data.melds) {
         const value = totalCardValue(meld.cards);
 
-        const { rows } = await client.query<GameMeldRow>(
-          `INSERT INTO game_melds (round_id, owner_user_id, meld_type, cards_json, total_value)
-           VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-          [data.roundId, data.ownerUserId, meld.type, JSON.stringify(meld.cards), value],
-        );
+        const { rows } = meld.id
+          ? await client.query<GameMeldRow>(
+              `INSERT INTO game_melds (id, round_id, owner_user_id, meld_type, cards_json, total_value)
+               VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+              [meld.id, data.roundId, data.ownerUserId, meld.type, JSON.stringify(meld.cards), value],
+            )
+          : await client.query<GameMeldRow>(
+              `INSERT INTO game_melds (round_id, owner_user_id, meld_type, cards_json, total_value)
+               VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+              [data.roundId, data.ownerUserId, meld.type, JSON.stringify(meld.cards), value],
+            );
 
         const created = rows[0];
         createdMelds.push(created);

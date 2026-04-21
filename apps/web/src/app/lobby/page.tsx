@@ -11,12 +11,24 @@ import type { GameRoom } from '@calash/shared';
 
 function LobbyInner() {
   const { user, logout } = useAuth();
-  const { room, connected } = useGame();
+  const { room, connected, createRoom, roomError } = useGame();
   const router = useRouter();
 
   const [rooms, setRooms] = useState<GameRoom[]>([]);
   const [loadingRooms, setLoadingRooms] = useState(true);
   const [fetchError, setFetchError] = useState('');
+  const [startingVsBot, setStartingVsBot] = useState(false);
+
+  function startVsComputer() {
+    if (!connected || startingVsBot) return;
+    setStartingVsBot(true);
+    createRoom({ maxPlayers: 2, fillWithBots: true, botDifficulty: 'easy' });
+  }
+
+  // Reset the vs-bot loading state if creation errored.
+  useEffect(() => {
+    if (roomError) setStartingVsBot(false);
+  }, [roomError]);
 
   // Redirect if already in a room
   useEffect(() => {
@@ -68,6 +80,14 @@ function LobbyInner() {
         <div className="row" style={{ gap: 12, marginBottom: '1.5rem', flexWrap: 'wrap' }}>
           <Link href="/rooms/create" className="btn btn-primary btn-lg">+ Create Room</Link>
           <Link href="/rooms/join" className="btn btn-ghost btn-lg">Join by Code</Link>
+          <button
+            onClick={startVsComputer}
+            disabled={!connected || startingVsBot}
+            className="btn btn-ghost btn-lg"
+            title="Start a heads-up game against an Easy bot"
+          >
+            {startingVsBot ? <><span className="spinner" />Starting…</> : '🤖 Play vs Computer'}
+          </button>
         </div>
 
         <div className="row" style={{ justifyContent: 'space-between', marginBottom: '0.75rem' }}>

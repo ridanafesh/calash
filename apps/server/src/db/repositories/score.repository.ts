@@ -153,6 +153,13 @@ export class ScoreRepository {
       await client.query('BEGIN');
 
       for (const { userId, finalScore } of data.scores) {
+        // Skip bots — they have no leaderboard_entries row and shouldn't count.
+        const { rows: botCheck } = await client.query<{ is_bot: boolean }>(
+          'SELECT is_bot FROM users WHERE id = $1',
+          [userId],
+        );
+        if (botCheck[0]?.is_bot) continue;
+
         const isWinner = userId === data.winnerId;
         await client.query(
           `INSERT INTO leaderboard_entries (user_id, games_played, games_won, total_score, highest_round_score)

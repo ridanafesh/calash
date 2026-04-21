@@ -17,6 +17,8 @@ import {
   handleRoomJoinByCode,
   handleRoomLeave,
   handleRoomReady,
+  handleRoomAddBot,
+  handleRoomRemoveBot,
   handleDisconnect,
   restorePlayerToRoom,
 } from './handlers/room.js';
@@ -39,25 +41,38 @@ export function createSocketServer(httpServer: HttpServer): Server<
   io.use(async (socket, next) => {
     const token = socket.handshake.auth['token'] as string | undefined;
     if (!token) {
+      console.warn(`[socket] handshake rejected: no token (origin=${socket.handshake.headers.origin ?? 'n/a'})`);
       next(new Error('Authentication required'));
       return;
     }
     try {
       const payload = jwt.verify(token, config.jwt.secret) as { userId: string };
-      socket.data.playerId = payload.userId;
 
-      // Resolve display name from DB.
-      const { rows } = await pool.query<{ display_name: string | null; username: string }>(
-        `SELECT up.display_name, u.username
+      // Verify the user still exists AND is not a bot — bots have no JWTs.
+      const { rows } = await pool.query<{ display_name: string | null; username: string; is_bot: boolean }>(
+        `SELECT u.is_bot, pp.display_name, pp.username
          FROM users u
-         LEFT JOIN user_profiles up ON up.user_id = u.id
+         LEFT JOIN player_profiles pp ON pp.user_id = u.id
          WHERE u.id = $1`,
         [payload.userId],
       );
-      socket.data.displayName = rows[0]?.display_name ?? rows[0]?.username ?? payload.userId;
+      if (rows.length === 0) {
+        console.warn(`[socket] handshake rejected: user ${payload.userId} no longer exists`);
+        next(new Error('Invalid token'));
+        return;
+      }
+      if (rows[0].is_bot) {
+        console.warn(`[socket] handshake rejected: ${payload.userId} is a bot`);
+        next(new Error('Invalid token'));
+        return;
+      }
+
+      socket.data.playerId = payload.userId;
+      socket.data.displayName = rows[0].display_name ?? rows[0].username ?? payload.userId;
 
       next();
-    } catch {
+    } catch (err) {
+      console.warn(`[socket] handshake rejected: ${(err as Error).message}`);
       next(new Error('Invalid token'));
     }
   });
@@ -102,6 +117,20 @@ export function createSocketServer(httpServer: HttpServer): Server<
     socket.on('room:ready', () => {
       handleRoomReady(socket, io).catch((err) => {
         console.error('[socket] room:ready error:', err);
+        socket.emit('room:error', { code: 'INTERNAL_ERROR', message: 'Internal server error.' });
+      });
+    });
+
+    socket.on('room:add-bot', (opts) => {
+      handleRoomAddBot(socket, io, opts).catch((err) => {
+        console.error('[socket] room:add-bot error:', err);
+        socket.emit('room:error', { code: 'INTERNAL_ERROR', message: 'Internal server error.' });
+      });
+    });
+
+    socket.on('room:remove-bot', (botUserId) => {
+      handleRoomRemoveBot(socket, io, botUserId).catch((err) => {
+        console.error('[socket] room:remove-bot error:', err);
         socket.emit('room:error', { code: 'INTERNAL_ERROR', message: 'Internal server error.' });
       });
     });

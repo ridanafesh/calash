@@ -1,4 +1,4 @@
-import type { RoundState } from '@calash/shared';
+import type { BotDifficulty, RoundState } from '@calash/shared';
 
 export interface PlayerSlot {
   userId: string;
@@ -6,6 +6,10 @@ export interface PlayerSlot {
   isReady: boolean;
   socketId: string | null;
   displayName: string;
+  /** True for bot players. Bots have socketId === null forever. */
+  isBot: boolean;
+  /** Difficulty for bots; undefined for human players. */
+  botDifficulty?: BotDifficulty;
 }
 
 export interface ActiveRound {

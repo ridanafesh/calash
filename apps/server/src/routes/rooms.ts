@@ -16,7 +16,9 @@ function storeStateToGameRoom(room: RoomState): GameRoom {
     userId: p.userId,
     displayName: p.displayName,
     isReady: p.isReady,
-    isConnected: p.socketId !== null,
+    isConnected: p.isBot || p.socketId !== null,
+    isBot: p.isBot,
+    botDifficulty: p.botDifficulty,
   }));
   return {
     id: room.roomId,
@@ -57,7 +59,7 @@ router.post('/rooms', requireAuth, async (req, res) => {
   await pool.query('UPDATE game_rooms SET invite_code = $1 WHERE id = $2', [inviteCode, dbRoom.id]);
 
   const { rows: profileRows } = await pool.query<{ display_name: string | null; username: string }>(
-    `SELECT up.display_name, u.username FROM users u LEFT JOIN user_profiles up ON up.user_id = u.id WHERE u.id = $1`,
+    `SELECT pp.display_name, pp.username FROM users u LEFT JOIN player_profiles pp ON pp.user_id = u.id WHERE u.id = $1`,
     [userId],
   );
   const displayName = profileRows[0]?.display_name ?? profileRows[0]?.username ?? userId;
@@ -68,7 +70,7 @@ router.post('/rooms', requireAuth, async (req, res) => {
     hostUserId: userId,
     status: 'lobby',
     maxPlayers,
-    players: [{ userId, seatIndex: 0, isReady: false, socketId: null, displayName }],
+    players: [{ userId, seatIndex: 0, isReady: false, socketId: null, displayName, isBot: false }],
     round: null,
   };
   roomStore.set(room);
@@ -103,6 +105,22 @@ router.get('/rooms', requireAuth, async (_req, res) => {
 // ─── GET /api/rooms/:id ───────────────────────────────────────────────────────
 // Get a single room by UUID.
 
+async function fetchPlayerMeta(userIds: string[]): Promise<Map<string, { displayName: string; isBot: boolean }>> {
+  const map = new Map<string, { displayName: string; isBot: boolean }>();
+  if (userIds.length === 0) return map;
+  const { rows } = await pool.query<{ id: string; display_name: string | null; username: string; is_bot: boolean }>(
+    `SELECT u.id, u.is_bot, pp.display_name, pp.username
+       FROM users u
+       LEFT JOIN player_profiles pp ON pp.user_id = u.id
+      WHERE u.id = ANY($1::uuid[])`,
+    [userIds],
+  );
+  for (const r of rows) {
+    map.set(r.id, { displayName: r.display_name ?? r.username ?? r.id, isBot: r.is_bot });
+  }
+  return map;
+}
+
 router.get('/rooms/:id', requireAuth, async (req, res) => {
   const { id } = req.params;
 
@@ -118,14 +136,19 @@ router.get('/rooms/:id', requireAuth, async (req, res) => {
     return;
   }
 
+  const meta = await fetchPlayerMeta(dbRoom.players.map((p) => p.user_id));
   const players: RoomPlayer[] = dbRoom.players
     .filter((p) => p.left_at === null)
-    .map((p) => ({
-      userId: p.user_id,
-      displayName: p.user_id,
-      isReady: (p as typeof p & { is_ready?: boolean }).is_ready ?? false,
-      isConnected: false,
-    }));
+    .map((p) => {
+      const m = meta.get(p.user_id);
+      return {
+        userId: p.user_id,
+        displayName: m?.displayName ?? p.user_id,
+        isReady: (p as typeof p & { is_ready?: boolean }).is_ready ?? false,
+        isConnected: false,
+        isBot: m?.isBot ?? false,
+      };
+    });
 
   const room: GameRoom = {
     id: dbRoom.id,
@@ -170,14 +193,19 @@ router.get('/rooms/join/:code', requireAuth, async (req, res) => {
     return;
   }
 
+  const meta2 = await fetchPlayerMeta(dbRoom.players.map((p) => p.user_id));
   const players: RoomPlayer[] = dbRoom.players
     .filter((p) => p.left_at === null)
-    .map((p) => ({
-      userId: p.user_id,
-      displayName: p.user_id,
-      isReady: (p as typeof p & { is_ready?: boolean }).is_ready ?? false,
-      isConnected: false,
-    }));
+    .map((p) => {
+      const m = meta2.get(p.user_id);
+      return {
+        userId: p.user_id,
+        displayName: m?.displayName ?? p.user_id,
+        isReady: (p as typeof p & { is_ready?: boolean }).is_ready ?? false,
+        isConnected: false,
+        isBot: m?.isBot ?? false,
+      };
+    });
 
   const room: GameRoom = {
     id: dbRoom.id,

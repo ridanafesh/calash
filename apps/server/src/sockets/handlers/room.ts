@@ -1,10 +1,12 @@
 import type { Server, Socket } from 'socket.io';
 import type {
+  BotDifficulty,
   ClientToServerEvents,
   ServerToClientEvents,
   InterServerEvents,
   SocketData,
   GameRoom,
+  RoomCreateOptions,
   RoomPlayer,
 } from '@calash/shared';
 import { GAME_CONFIG } from '@calash/shared';
@@ -12,6 +14,7 @@ import { GAME_CONFIG } from '@calash/shared';
 import { pool } from '../../db/index.js';
 import { createDatabaseService } from '../../db/repositories/index.js';
 import { roomStore, generateInviteCode, type RoomState } from '../../store/index.js';
+import { createBotUser } from '../../services/bot.service.js';
 
 type CalashSocket = Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
 type CalashServer = Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
@@ -25,7 +28,10 @@ function toGameRoom(room: RoomState): GameRoom {
     userId: p.userId,
     displayName: p.displayName,
     isReady: p.isReady,
-    isConnected: p.socketId !== null,
+    // Bots are always considered connected — they have no socket but cannot drop.
+    isConnected: p.isBot || p.socketId !== null,
+    isBot: p.isBot,
+    botDifficulty: p.botDifficulty,
   }));
 
   return {
@@ -47,11 +53,36 @@ function emitError(socket: CalashSocket, code: string, message: string): void {
   socket.emit('room:error', { code, message });
 }
 
+/**
+ * Fetch display name + is_bot for a batch of user ids in a single round-trip.
+ * Used by reconnect / DB-rebuild paths so we restore PlayerSlot.isBot correctly.
+ */
+async function fetchUserMeta(
+  userIds: readonly string[],
+): Promise<Map<string, { displayName: string; isBot: boolean }>> {
+  const map = new Map<string, { displayName: string; isBot: boolean }>();
+  if (userIds.length === 0) return map;
+  const { rows } = await pool.query<{ id: string; display_name: string | null; username: string; is_bot: boolean }>(
+    `SELECT u.id, u.is_bot, pp.display_name, pp.username
+       FROM users u
+       LEFT JOIN player_profiles pp ON pp.user_id = u.id
+      WHERE u.id = ANY($1::uuid[])`,
+    [userIds as string[]],
+  );
+  for (const r of rows) {
+    map.set(r.id, {
+      displayName: r.display_name ?? r.username ?? r.id,
+      isBot: r.is_bot,
+    });
+  }
+  return map;
+}
+
 // ─── Reconnect / restore helper ───────────────────────────────────────────────
 
 export async function restorePlayerToRoom(
   socket: CalashSocket,
-  io: CalashServer,
+  _io: CalashServer,
 ): Promise<void> {
   const { playerId } = socket.data;
 
@@ -71,6 +102,7 @@ export async function restorePlayerToRoom(
     // This can happen after a server restart.  For now we skip rebuilding the
     // full RoundState (that would require re-hydrating game-core from DB rows)
     // and just restore the lobby state.
+    const userMeta = await fetchUserMeta(full.players.map((p) => p.user_id));
     const newRoom: RoomState = {
       roomId: full.id,
       inviteCode: (full as typeof full & { invite_code?: string }).invite_code ?? '',
@@ -79,13 +111,18 @@ export async function restorePlayerToRoom(
       maxPlayers: full.max_players,
       players: full.players
         .filter((p) => p.left_at === null)
-        .map((p, i) => ({
-          userId: p.user_id,
-          seatIndex: p.seat_index,
-          isReady: (p as typeof p & { is_ready?: boolean }).is_ready ?? false,
-          socketId: null,
-          displayName: p.user_id,
-        })),
+        .map((p) => {
+          const meta = userMeta.get(p.user_id);
+          return {
+            userId: p.user_id,
+            seatIndex: p.seat_index,
+            isReady: (p as typeof p & { is_ready?: boolean }).is_ready ?? false,
+            socketId: null,
+            displayName: meta?.displayName ?? p.user_id,
+            isBot: meta?.isBot ?? false,
+            ...(meta?.isBot ? { botDifficulty: 'easy' as BotDifficulty } : {}),
+          };
+        }),
       round: null,
     };
     roomStore.set(newRoom);
@@ -124,8 +161,8 @@ export async function restorePlayerToRoom(
 
 export async function handleRoomCreate(
   socket: CalashSocket,
-  io: CalashServer,
-  options: { maxPlayers: number },
+  _io: CalashServer,
+  options: RoomCreateOptions,
 ): Promise<void> {
   const { playerId, displayName } = socket.data;
 
@@ -134,7 +171,7 @@ export async function handleRoomCreate(
     return;
   }
 
-  const { maxPlayers } = options;
+  const { maxPlayers, fillWithBots, botDifficulty } = options;
   if (maxPlayers < GAME_CONFIG.MIN_PLAYERS || maxPlayers > GAME_CONFIG.MAX_PLAYERS) {
     emitError(socket, 'INVALID_MAX_PLAYERS', `maxPlayers must be ${GAME_CONFIG.MIN_PLAYERS}–${GAME_CONFIG.MAX_PLAYERS}`);
     return;
@@ -164,6 +201,7 @@ export async function handleRoomCreate(
       isReady: false,
       socketId: socket.id,
       displayName: displayName ?? playerId,
+      isBot: false,
     }],
     round: null,
   };
@@ -172,8 +210,114 @@ export async function handleRoomCreate(
   socket.data.roomId = room.roomId;
   await socket.join(room.roomId);
 
+  // Optionally fill the remaining seats with bots immediately (single-player flow).
+  if (fillWithBots) {
+    const difficulty: BotDifficulty = botDifficulty ?? 'easy';
+    const seatsToFill = maxPlayers - room.players.length;
+    for (let i = 0; i < seatsToFill; i++) {
+      await addBotToRoom(room, difficulty);
+    }
+  }
+
   socket.emit('room:updated', toGameRoom(room));
-  console.log(`[room] ${playerId} created room ${room.roomId} (code: ${inviteCode})`);
+  console.log(`[room] ${playerId} created room ${room.roomId} (code: ${inviteCode}${fillWithBots ? `, ${room.players.length - 1} bots` : ''})`);
+}
+
+// ─── room:add-bot / room:remove-bot ──────────────────────────────────────────
+
+/**
+ * Internal helper: provision a bot user, register it as a player in the given
+ * room, persist the player row, and mark the bot ready (bots are always ready).
+ *
+ * Caller is responsible for broadcasting room:updated after adding bots.
+ */
+async function addBotToRoom(room: RoomState, difficulty: BotDifficulty): Promise<void> {
+  if (room.players.length >= room.maxPlayers) {
+    throw new Error('Room is full');
+  }
+
+  const seatNumber = room.players.filter((p) => p.isBot).length + 1;
+  const bot = await createBotUser(pool, { difficulty, seatNumber });
+  await db.rooms.addPlayer(room.roomId, bot.userId);
+  await pool.query(
+    'UPDATE game_room_players SET is_ready = true WHERE room_id = $1 AND user_id = $2',
+    [room.roomId, bot.userId],
+  );
+
+  room.players.push({
+    userId: bot.userId,
+    seatIndex: room.players.length,
+    isReady: true,
+    socketId: null,
+    displayName: bot.displayName,
+    isBot: true,
+    botDifficulty: difficulty,
+  });
+  roomStore.trackUser(bot.userId, room.roomId);
+}
+
+export async function handleRoomAddBot(
+  socket: CalashSocket,
+  io: CalashServer,
+  opts?: { difficulty?: BotDifficulty },
+): Promise<void> {
+  const { playerId, roomId } = socket.data;
+  if (!roomId) {
+    emitError(socket, 'NOT_IN_ROOM', 'You are not in a room.');
+    return;
+  }
+  const room = roomStore.get(roomId);
+  if (!room) { emitError(socket, 'ROOM_NOT_FOUND', 'Room not found.'); return; }
+  if (room.hostUserId !== playerId) {
+    emitError(socket, 'NOT_HOST', 'Only the room host can add bots.');
+    return;
+  }
+  if (room.status !== 'lobby') {
+    emitError(socket, 'GAME_ALREADY_STARTED', 'Cannot add bots after the game starts.');
+    return;
+  }
+  if (room.players.length >= room.maxPlayers) {
+    emitError(socket, 'ROOM_FULL', 'Room is already full.');
+    return;
+  }
+
+  const difficulty: BotDifficulty = opts?.difficulty ?? 'easy';
+  await addBotToRoom(room, difficulty);
+  broadcastRoomUpdate(io, room);
+  console.log(`[room] Bot added to ${room.roomId} (difficulty: ${difficulty})`);
+}
+
+export async function handleRoomRemoveBot(
+  socket: CalashSocket,
+  io: CalashServer,
+  botUserId: string,
+): Promise<void> {
+  const { playerId, roomId } = socket.data;
+  if (!roomId) { emitError(socket, 'NOT_IN_ROOM', 'You are not in a room.'); return; }
+  const room = roomStore.get(roomId);
+  if (!room) { emitError(socket, 'ROOM_NOT_FOUND', 'Room not found.'); return; }
+  if (room.hostUserId !== playerId) {
+    emitError(socket, 'NOT_HOST', 'Only the room host can remove bots.');
+    return;
+  }
+  if (room.status !== 'lobby') {
+    emitError(socket, 'GAME_ALREADY_STARTED', 'Cannot remove bots after the game starts.');
+    return;
+  }
+  const target = room.players.find((p) => p.userId === botUserId);
+  if (!target || !target.isBot) {
+    emitError(socket, 'NOT_A_BOT', 'That player is not a bot.');
+    return;
+  }
+
+  await db.rooms.removePlayer(room.roomId, botUserId);
+  room.players = room.players.filter((p) => p.userId !== botUserId);
+  // Re-seat remaining players to keep seatIndex contiguous.
+  room.players.forEach((p, idx) => { p.seatIndex = idx; });
+  roomStore.untrackUser(botUserId);
+
+  broadcastRoomUpdate(io, room);
+  console.log(`[room] Bot ${botUserId} removed from ${room.roomId}`);
 }
 
 // ─── room:join (shared logic for both by-id and by-code) ─────────────────────
@@ -217,7 +361,7 @@ async function joinRoom(
   const seatIndex = room.players.length;
   await db.rooms.addPlayer(room.roomId, playerId);
 
-  const slot = { userId: playerId, seatIndex, isReady: false, socketId: socket.id, displayName: displayName ?? playerId };
+  const slot = { userId: playerId, seatIndex, isReady: false, socketId: socket.id, displayName: displayName ?? playerId, isBot: false };
   room.players.push(slot);
   roomStore.trackUser(playerId, room.roomId);
 
@@ -233,7 +377,7 @@ export async function handleRoomJoin(
   io: CalashServer,
   roomId: string,
 ): Promise<void> {
-  const { playerId } = socket.data;
+  const { playerId: _playerId } = socket.data;
 
   if (socket.data.roomId && socket.data.roomId !== roomId) {
     emitError(socket, 'ALREADY_IN_ROOM', 'Leave your current room first.');
@@ -254,13 +398,21 @@ export async function handleRoomJoin(
       hostUserId: dbRoom.host_user_id,
       status: dbRoom.status === 'in_progress' ? 'in-progress' : dbRoom.status === 'finished' ? 'finished' : 'lobby',
       maxPlayers: dbRoom.max_players,
-      players: dbRoom.players.filter((p) => p.left_at === null).map((p) => ({
-        userId: p.user_id,
-        seatIndex: p.seat_index,
-        isReady: (p as typeof p & { is_ready?: boolean }).is_ready ?? false,
-        socketId: null,
-        displayName: p.user_id,
-      })),
+      players: await (async () => {
+        const meta = await fetchUserMeta(dbRoom.players.map((p) => p.user_id));
+        return dbRoom.players.filter((p) => p.left_at === null).map((p) => {
+          const m = meta.get(p.user_id);
+          return {
+            userId: p.user_id,
+            seatIndex: p.seat_index,
+            isReady: (p as typeof p & { is_ready?: boolean }).is_ready ?? false,
+            socketId: null,
+            displayName: m?.displayName ?? p.user_id,
+            isBot: m?.isBot ?? false,
+            ...(m?.isBot ? { botDifficulty: 'easy' as BotDifficulty } : {}),
+          };
+        });
+      })(),
       round: null,
     };
     roomStore.set(room);
@@ -274,7 +426,7 @@ export async function handleRoomJoinByCode(
   io: CalashServer,
   code: string,
 ): Promise<void> {
-  const { playerId } = socket.data;
+  const { playerId: _playerId } = socket.data;
   const normalised = code.trim().toUpperCase();
 
   if (socket.data.roomId) {
@@ -326,16 +478,25 @@ export async function handleRoomLeave(
   socket.data.roomId = undefined;
   await socket.leave(roomId);
 
-  if (room.players.length === 0) {
+  // If only bots remain, abandon the room — bots can't run a game alone.
+  const remainingHumans = room.players.filter((p) => !p.isBot);
+  if (remainingHumans.length === 0) {
+    for (const bot of room.players) {
+      await db.rooms.removePlayer(roomId, bot.userId).catch(() => {});
+      roomStore.untrackUser(bot.userId);
+    }
+    room.players = [];
     await db.rooms.updateStatus(roomId, 'abandoned');
     roomStore.delete(roomId);
-    console.log(`[room] Room ${roomId} abandoned.`);
+    const { cancelBotTimer } = await import('./game.js');
+    cancelBotTimer(roomId);
+    console.log(`[room] Room ${roomId} abandoned (no humans remaining).`);
     return;
   }
 
-  // Transfer host if the host left.
+  // Transfer host to the first remaining HUMAN if the host left.
   if (room.hostUserId === playerId) {
-    room.hostUserId = room.players[0].userId;
+    room.hostUserId = remainingHumans[0].userId;
   }
 
   broadcastRoomUpdate(io, room);
@@ -443,14 +604,20 @@ async function startGame(room: RoomState, io: CalashServer): Promise<void> {
   io.to(room.roomId).emit('room:updated', toGameRoom(room));
   io.to(room.roomId).emit('game:state', toRoundStateView(roundState));
 
-  // Send each player their private hand.
+  // Send each player their private hand. Bots have no socket — they read their
+  // hand from room.round.state.playerStates directly.
   for (const player of room.players) {
-    if (!player.socketId) continue;
+    if (player.isBot || !player.socketId) continue;
     const hand = roundState.playerStates[player.userId]?.hand ?? [];
     io.to(player.socketId).emit('game:hand', hand);
   }
 
   console.log(`[room] Game started in room ${room.roomId}`);
+
+  // If the first turn belongs to a bot, kick off the driver.
+  // Lazy import avoids a circular module load with game.ts.
+  const { scheduleBotIfNeeded } = await import('./game.js');
+  scheduleBotIfNeeded(room.roomId, io);
 }
 
 // Export startGame for use in game handler (new round after round ends).

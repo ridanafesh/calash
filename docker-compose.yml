@@ -1,5 +1,3 @@
-version: '3.9'
-
 # ── Development database only ─────────────────────────────────────────────────
 # Run `docker compose up -d db` to get a local PostgreSQL instance.
 # The server and web services use `npm run dev` on the host (hot reload).

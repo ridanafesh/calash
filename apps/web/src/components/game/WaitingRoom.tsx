@@ -8,7 +8,7 @@ import { GAME_CONFIG } from '@calash/shared';
 
 export function WaitingRoom() {
   const { user } = useAuth();
-  const { room, roomError, toggleReady, leaveRoom, clearError } = useGame();
+  const { room, roomError, toggleReady, addBot, removeBot, leaveRoom, clearError } = useGame();
   const [copied, setCopied] = useState(false);
 
   if (!room) return null;
@@ -17,6 +17,7 @@ export function WaitingRoom() {
   const isHost = room.hostUserId === user?.id;
   const allReady = room.players.length >= GAME_CONFIG.MIN_PLAYERS && room.players.every((p) => p.isReady);
   const canStart = allReady;
+  const hasOpenSeat = room.players.length < room.maxPlayers;
 
   function copyCode() {
     navigator.clipboard.writeText(room!.code).then(() => {
@@ -99,27 +100,51 @@ export function WaitingRoom() {
                 style={{ justifyContent: 'space-between', gap: 8 }}
               >
                 <div className="row" style={{ gap: 8 }}>
-                  <div className="avatar" style={{ width: 28, height: 28, fontSize: '0.75rem' }}>
-                    {(p.displayName || p.userId).charAt(0).toUpperCase()}
+                  <div
+                    className="avatar"
+                    style={{
+                      width: 28, height: 28, fontSize: '0.75rem',
+                      background: p.isBot ? 'var(--surface-2)' : 'var(--accent)',
+                      color: p.isBot ? 'var(--text-secondary)' : '#fff',
+                    }}
+                    aria-label={p.isBot ? 'Bot avatar' : 'Player avatar'}
+                  >
+                    {p.isBot ? '🤖' : (p.displayName || p.userId).charAt(0).toUpperCase()}
                   </div>
                   <span style={{ fontWeight: p.userId === user?.id ? 700 : 400 }}>
                     {p.displayName || p.userId}
                     {p.userId === user?.id && (
                       <span style={{ color: 'var(--text-secondary)', fontWeight: 400 }}> (you)</span>
                     )}
-                    {p.userId === room.hostUserId && (
+                    {p.userId === room.hostUserId && !p.isBot && (
                       <span style={{ color: 'var(--warning)', marginLeft: 4 }}>👑</span>
                     )}
                   </span>
+                  {p.isBot && (
+                    <span className="badge badge-accent" title={`Difficulty: ${p.botDifficulty ?? 'easy'}`}>
+                      BOT
+                    </span>
+                  )}
                 </div>
                 <div className="row" style={{ gap: 6 }}>
-                  {!p.isConnected && (
+                  {!p.isBot && !p.isConnected && (
                     <span className="badge badge-warning">disconnected</span>
                   )}
                   {p.isReady ? (
                     <span className="badge badge-success">✓ Ready</span>
                   ) : (
                     <span className="badge badge-neutral">Waiting</span>
+                  )}
+                  {isHost && p.isBot && (
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => removeBot(p.userId)}
+                      aria-label={`Remove ${p.displayName}`}
+                      title="Remove bot"
+                      style={{ padding: '2px 8px' }}
+                    >
+                      ✕
+                    </button>
                   )}
                 </div>
               </div>
@@ -140,6 +165,16 @@ export function WaitingRoom() {
 
         {/* Actions */}
         <div className="col" style={{ gap: '0.75rem' }}>
+          {isHost && hasOpenSeat && (
+            <button
+              className="btn btn-ghost btn-lg"
+              style={{ width: '100%' }}
+              onClick={() => addBot('easy')}
+            >
+              🤖 Add Easy Bot
+            </button>
+          )}
+
           {me && (
             <button
               className={`btn ${me.isReady ? 'btn-ghost' : 'btn-success'} btn-lg`}

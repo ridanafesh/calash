@@ -342,15 +342,31 @@ function applyAddToMeld(
     return { ...m, cards: updatedCards, totalValue: totalCardValue(updatedCards) };
   });
 
-  // MVP rule: cards added to ANY meld count toward the contributor's tableTotal.
+  // Cards added to ANY meld count toward the contributor's tableTotal.
   const newActorTableTotal = actorPs.tableTotal + addedValue;
   const newHighest = Math.max(state.highestTableTotal, newActorTableTotal);
 
-  const newPlayerStates = {
-    ...state.playerStates,
-    [ownerId]: { ...ownerPs, melds: updatedOwnerMelds },
-    [playerId]: { ...actorPs, hand: newActorHand, tableTotal: newActorTableTotal },
-  };
+  // When the actor owns the meld, the owner update and actor update target the
+  // SAME player record. Apply both updates to a single derived record so one
+  // doesn't shadow the other.
+  let newPlayerStates: RoundState['playerStates'];
+  if (ownerId === playerId) {
+    newPlayerStates = {
+      ...state.playerStates,
+      [playerId]: {
+        ...actorPs,
+        hand: newActorHand,
+        melds: updatedOwnerMelds,
+        tableTotal: newActorTableTotal,
+      },
+    };
+  } else {
+    newPlayerStates = {
+      ...state.playerStates,
+      [ownerId]: { ...ownerPs, melds: updatedOwnerMelds },
+      [playerId]: { ...actorPs, hand: newActorHand, tableTotal: newActorTableTotal },
+    };
+  }
 
   return {
     ok: true,
