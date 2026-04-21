@@ -1,4 +1,4 @@
-import type { RoundState } from '@calash/game-core';
+import type { RoundState } from '@calash/shared';
 
 export interface PlayerSlot {
   userId: string;

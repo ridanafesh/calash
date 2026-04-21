@@ -9,9 +9,15 @@ calash/
 ├── apps/
 │   ├── server/          # Node.js + Express + Socket.IO backend
 │   └── web/             # Next.js 14 frontend
-└── packages/
-    ├── shared/          # Shared TypeScript types (no runtime deps)
-    └── game-core/       # Pure game logic & validation (no framework deps)
+├── packages/
+│   ├── shared/          # Shared TypeScript types (no runtime deps)
+│   └── game-core/       # Pure game logic & validation (no framework deps)
+├── docs/
+│   ├── MONETIZATION.md  # Commerce architecture & payment provider guide
+│   └── MOBILE.md        # React Native integration guide
+├── ARCHITECTURE.md      # ADRs, system design, data model
+├── HANDOFF.md           # Developer onboarding & contribution guide
+└── docker-compose.yml   # Local dev database (postgres)
 ```
 
 ## Tech stack
@@ -22,40 +28,21 @@ calash/
 | Backend | Node.js 20, Express 4, Socket.IO 4 |
 | Database | PostgreSQL 16 |
 | Realtime | Socket.IO (WebSockets) |
-| Auth | JWT + bcrypt |
+| Auth | JWT + bcrypt, optional Google OAuth |
 | Validation | Zod |
+| Logging | pino |
+| Testing | Jest + ts-jest + supertest |
 | Package manager | npm workspaces |
-
-## Prerequisites
-
-- Node.js 20+
-- npm 10+
-- PostgreSQL 16 (or Docker)
 
 ## Quick start
 
 ```bash
-# 1. Clone and install
+# 1. Clone and set up (installs deps, copies env files, starts DB, migrates, seeds)
 git clone https://github.com/ridanafesh/calash.git
 cd calash
-npm install
+./scripts/setup.sh
 
-# 2. Set up environment files
-cp apps/server/.env.example apps/server/.env
-cp apps/web/.env.example apps/web/.env.local
-# Edit both files with your values
-
-# 3. Start PostgreSQL (Docker)
-docker run -d --name calash-pg \
-  -e POSTGRES_PASSWORD=password \
-  -e POSTGRES_DB=calash \
-  -p 5432:5432 postgres:16
-
-# 4. Run database schema
-psql postgresql://postgres:password@localhost:5432/calash \
-  < apps/server/src/db/schema.sql
-
-# 5. Start all services (server + web in parallel)
+# 2. Start all services (server :4000 + web :3000)
 npm run dev
 ```
 
@@ -63,46 +50,84 @@ npm run dev
 - API: [http://localhost:4000](http://localhost:4000)
 - Health: [http://localhost:4000/api/health](http://localhost:4000/api/health)
 
-## Individual app commands
+### Manual setup (without Docker)
 
 ```bash
-# Server only
+npm install
+
+# Copy and edit env files
+cp apps/server/.env.example apps/server/.env
+cp apps/web/.env.example apps/web/.env.local
+
+# Start PostgreSQL yourself, then:
+npm run db:migrate -w apps/server
+npm run db:seed -w apps/server
+npm run dev
+```
+
+## Running tests
+
+```bash
+# All tests (game-core + server integration)
+npm test
+
+# Game-core unit tests (60+ covering all game rules)
+npm test -w packages/game-core
+
+# Server integration tests (23 tests, no real DB needed)
+cd apps/server && npx jest
+```
+
+## Individual commands
+
+```bash
+# Start server only
 npm run dev -w apps/server
 
-# Web only
+# Start web only
 npm run dev -w apps/web
 
 # Build everything
 npm run build
 
-# Lint
-npm run lint
+# Run migrations
+npm run db:migrate -w apps/server
 
-# Format
-npm run format
+# Seed development data
+npm run db:seed -w apps/server
+
+# Reset database (drop + migrate + seed)
+./scripts/reset-db.sh
 ```
+
+## Seed accounts
+
+After `npm run db:seed`, the following accounts are available:
+
+| Email | Password | Role |
+|---|---|---|
+| alice@example.com | password | Player |
+| bob@example.com | password | Player |
+| charlie@example.com | password | Player |
 
 ## Architecture decisions
 
-### Why monorepo?
-Shared types (`@calash/shared`) and game logic (`@calash/game-core`) are consumed by both the web app and the future React Native app. A monorepo eliminates type drift and makes refactoring across layers safe.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the full design document including ADRs.
 
-### Why game-core is framework-free
-`@calash/game-core` has zero runtime dependencies on Express, React, or any platform SDK. This means the same deck, validation, and scoring logic runs identically on the server (authoritative) and can be imported into a mobile app for local previews without a server round-trip.
+### Key decisions
 
-### Future mobile app
-Add `apps/mobile` (Expo or bare React Native), depend on `@calash/shared` and `@calash/game-core`, and implement a platform-specific socket layer. No changes needed in `apps/server` or the shared packages.
+**Monorepo** — `@calash/shared` and `@calash/game-core` are consumed by both the web app and the future React Native app. A monorepo eliminates type drift and makes cross-layer refactoring safe.
 
-### Future payments
-- Web: PayPal SDK in `apps/web`; a `/api/payments` route in `apps/server`
-- Mobile: `react-native-iap` for Apple/Google; server validates receipts
-- The `payments` table is already scaffolded (commented out) in `apps/server/src/db/schema.sql`
+**Framework-free game logic** — `@calash/game-core` has zero runtime dependencies. The same deck, validation, and scoring logic runs on the server (authoritative) and can be imported into a mobile app for offline UI previews without a round-trip.
 
-## Package overview
+**In-memory + DB** — Active game rooms live in a `Map`-based store for zero-latency socket events. Completed rounds and scores are persisted to PostgreSQL.
 
-| Package | Purpose |
-|---|---|
-| `@calash/shared` | TypeScript interfaces for players, game state, Socket.IO events, API contracts |
-| `@calash/game-core` | Deck creation/shuffle/deal, action validation, scoring — pure functions, no I/O |
-| `@calash/server` | REST API, Socket.IO server, PostgreSQL queries, JWT auth |
-| `@calash/web` | Next.js pages, API client, Socket.IO client singleton |
+**Commerce behind a flag** — All payment tables, services, and provider stubs are fully wired. Routes return `503` until `COMMERCE_ENABLED=true`. No live payment UI is exposed until credentials and legal review are complete.
+
+## Adding a mobile app
+
+See [docs/MOBILE.md](docs/MOBILE.md) for the step-by-step guide. No changes are needed in `apps/server` or `packages/` — add `apps/mobile` and connect it to the existing API and socket events.
+
+## Enabling payments
+
+See [docs/MONETIZATION.md](docs/MONETIZATION.md). Supported platforms: PayPal (web), Apple IAP (iOS), Google Play (Android).

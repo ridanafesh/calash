@@ -1,0 +1,57 @@
+version: '3.9'
+
+# ── Development database only ─────────────────────────────────────────────────
+# Run `docker compose up -d db` to get a local PostgreSQL instance.
+# The server and web services use `npm run dev` on the host (hot reload).
+#
+# To also run server + web in Docker (no hot reload):
+#   docker compose --profile full up
+#
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: calash
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Optional: run the full stack in Docker (add --profile full)
+  server:
+    profiles: ['full']
+    build:
+      context: .
+      dockerfile: apps/server/Dockerfile
+    ports:
+      - '4000:4000'
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://postgres:password@db:5432/calash
+      JWT_SECRET: dev-jwt-secret-change-in-production
+      CORS_ORIGIN: http://localhost:3000
+
+  web:
+    profiles: ['full']
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    ports:
+      - '3000:3000'
+    depends_on:
+      - server
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:4000
+
+volumes:
+  pgdata:

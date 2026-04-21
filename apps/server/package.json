@@ -8,8 +8,11 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "db:migrate": "node dist/db/migrate.js",
-    "db:seed": "npx tsx src/db/seed.ts"
+    "db:migrate": "npx tsx src/db/migrate.ts",
+    "db:seed": "npx tsx src/db/seed.ts",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage"
   },
   "dependencies": {
     "@calash/game-core": "*",
@@ -22,6 +25,8 @@
     "jsonwebtoken": "^9.0.2",
     "google-auth-library": "^9.13.0",
     "pg": "^8.11.5",
+    "pino": "^9.4.0",
+    "pino-pretty": "^11.2.2",
     "socket.io": "^4.7.5",
     "zod": "^3.23.4"
   },
@@ -29,9 +34,14 @@
     "@types/bcryptjs": "^2.4.6",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
+    "@types/jest": "^29.5.12",
     "@types/jsonwebtoken": "^9.0.6",
     "@types/node": "^20.12.7",
     "@types/pg": "^8.11.5",
+    "@types/supertest": "^6.0.2",
+    "jest": "^29.7.0",
+    "supertest": "^7.0.0",
+    "ts-jest": "^29.1.4",
     "tsx": "^4.8.2",
     "typescript": "*"
   }
