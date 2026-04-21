@@ -22,7 +22,7 @@ import type {
   RoundEndReason,
 } from '@calash/shared';
 import { GAME_CONFIG } from '@calash/shared';
-import { createDeck, shuffleDeck, dealHands, isSameCard, removeCardsFromHand } from './deck.js';
+import { createDeck, shuffleDeck, dealHands, removeCardsFromHand } from './deck.js';
 import { validateTurnAction } from './rules/turn.js';
 import type { TurnContext } from './rules/turn.js';
 import { applyTakeFromDiscard } from './rules/discard.js';

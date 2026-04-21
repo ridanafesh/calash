@@ -16,10 +16,13 @@ const db = createDatabaseService(pool);
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function signToken(userId: string, isGuest: boolean): string {
+  const expiresIn = isGuest ? config.jwt.guestExpiresIn : config.jwt.expiresIn;
   return jwt.sign(
     { userId, isGuest } satisfies AuthPayload,
     config.jwt.secret,
-    { expiresIn: isGuest ? config.jwt.guestExpiresIn : config.jwt.expiresIn },
+    // @types/jsonwebtoken now requires StringValue (branded type) for expiresIn;
+    // we know these env values are valid ms-format strings (e.g. '7d', '24h').
+    { expiresIn: expiresIn as unknown as jwt.SignOptions['expiresIn'] },
   );
 }
 

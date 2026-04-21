@@ -1,25 +1,30 @@
 /**
- * Commerce routes — products, orders, payments, inventory, entitlements.
+ * Commerce routes — products, orders, payments, inventory, entitlements,
+ *                  purchase history, and wallet.
  *
  * ALL routes return 503 Service Unavailable unless COMMERCE_ENABLED=true.
  * This lets us ship the code safely while keeping the feature dark until
  * payment credentials and legal review are complete.
  *
- * Route map:
+ * Route map (player-facing):
  *   GET    /api/commerce/products                     — list active products
  *   GET    /api/commerce/products/:id                 — product + prices
  *   POST   /api/commerce/orders                       — create an order
+ *   GET    /api/commerce/orders                       — purchase history
  *   POST   /api/commerce/payments/intent              — create payment intent
  *   POST   /api/commerce/payments/verify              — verify & capture
  *   GET    /api/commerce/inventory                    — user's inventory
  *   GET    /api/commerce/entitlements                 — user's entitlements
+ *   GET    /api/commerce/wallet                       — wallet balance
  *   POST   /api/commerce/webhooks/:provider           — provider webhooks (no auth)
  *
- * Admin stubs (require admin role — not yet enforced, left for Phase 2):
+ * Admin stubs (require admin role — not yet enforced, Phase 2):
  *   GET    /api/commerce/admin/orders                 — all orders
+ *   GET    /api/commerce/admin/providers              — provider registry status
  *   POST   /api/commerce/admin/refund                 — issue refund
  *   POST   /api/commerce/admin/entitlements/grant     — manual entitlement grant
  *   DELETE /api/commerce/admin/entitlements/revoke    — manual entitlement revoke
+ *   POST   /api/commerce/admin/wallet/credit          — admin wallet credit
  */
 
 import { Router, type Request, type Response, type NextFunction } from 'express';
@@ -46,215 +51,284 @@ const entitlements = new EntitlementsService(pool);
 
 router.use(commerceGuard);
 
-  // ── Products ────────────────────────────────────────────────────────────────
+// ── Products ──────────────────────────────────────────────────────────────────
 
-  router.get('/commerce/products', async (_req, res) => {
-    const products = await commerce.listActiveProducts();
-    res.json({ products });
+router.get('/commerce/products', async (_req, res) => {
+  const products = await commerce.listActiveProducts();
+  res.json({ products });
+});
+
+router.get('/commerce/products/:id', async (req, res) => {
+  const result = await commerce.getProductWithPrices(req.params['id']!);
+  if (!result) { res.status(404).json({ error: 'Product not found' }); return; }
+  res.json(result);
+});
+
+// ── Orders ────────────────────────────────────────────────────────────────────
+
+router.post('/commerce/orders', requireAuth, async (req: Request, res: Response) => {
+  const userId = (req as Request & { userId?: string }).userId!;
+  const { productId, priceId, platform } = req.body as {
+    productId?: string; priceId?: string; platform?: string;
+  };
+
+  if (!productId || !priceId || !platform) {
+    res.status(400).json({ error: 'productId, priceId, and platform are required' });
+    return;
+  }
+
+  const productData = await commerce.getProductWithPrices(productId);
+  if (!productData) { res.status(404).json({ error: 'Product not found' }); return; }
+
+  const price = productData.prices.find((p) => p.id === priceId && p.platform === platform);
+  if (!price) { res.status(404).json({ error: 'Price not found for platform' }); return; }
+
+  const order = await commerce.createOrder({
+    userId,
+    productId,
+    priceId,
+    platform,
+    amountCents: price.amountCents,
+    currency: price.currency,
   });
 
-  router.get('/commerce/products/:id', async (req, res) => {
-    const result = await commerce.getProductWithPrices(req.params['id']!);
-    if (!result) { res.status(404).json({ error: 'Product not found' }); return; }
-    res.json(result);
-  });
+  res.status(201).json({ order });
+});
 
-  // ── Orders ──────────────────────────────────────────────────────────────────
+/** Purchase history for the authenticated user. */
+router.get('/commerce/orders', requireAuth, async (req: Request, res: Response) => {
+  const userId = (req as Request & { userId?: string }).userId!;
+  const history = await commerce.getUserPurchaseHistory(userId);
+  res.json({ orders: history });
+});
 
-  router.post('/commerce/orders', requireAuth, async (req: Request, res: Response) => {
-    const userId = (req as Request & { userId?: string }).userId!;
-    const { productId, priceId, platform } = req.body as {
-      productId?: string; priceId?: string; platform?: string;
-    };
+// ── Payment intent ────────────────────────────────────────────────────────────
 
-    if (!productId || !priceId || !platform) {
-      res.status(400).json({ error: 'productId, priceId, and platform are required' });
-      return;
-    }
+router.post('/commerce/payments/intent', requireAuth, async (req: Request, res: Response) => {
+  const userId = (req as Request & { userId?: string }).userId!;
+  const { orderId } = req.body as { orderId?: string };
 
-    const productData = await commerce.getProductWithPrices(productId);
-    if (!productData) { res.status(404).json({ error: 'Product not found' }); return; }
+  if (!orderId) { res.status(400).json({ error: 'orderId is required' }); return; }
 
-    const price = productData.prices.find((p) => p.id === priceId && p.platform === platform);
-    if (!price) { res.status(404).json({ error: 'Price not found for platform' }); return; }
+  const order = await commerce.getOrder(orderId);
+  if (!order || order.userId !== userId) {
+    res.status(404).json({ error: 'Order not found' }); return;
+  }
+  if (order.status !== 'pending') {
+    res.status(409).json({ error: 'Order is not in pending state' }); return;
+  }
 
-    const order = await commerce.createOrder({
-      userId, productId, priceId, platform,
-      amountCents: price.amountCents, currency: price.currency,
+  const provider = getProvider(order.platform as PaymentPlatform);
+  if (!provider) {
+    res.status(503).json({
+      error: `Payment provider for platform '${order.platform}' is not enabled`,
     });
+    return;
+  }
 
-    res.status(201).json({ order });
+  const productData = await commerce.getProductWithPrices(order.productId);
+
+  const intent = await provider.createPaymentIntent({
+    orderId: order.id,
+    userId,
+    amountCents: order.amountCents,
+    currency: order.currency,
+    productId: order.productId,
+    productName: productData?.product.name ?? order.productId,
   });
 
-  // ── Payment intent ──────────────────────────────────────────────────────────
+  const payment = await commerce.createPayment({
+    orderId: order.id,
+    userId,
+    provider: provider.name,
+    amountCents: order.amountCents,
+    currency: order.currency,
+  });
 
-  router.post('/commerce/payments/intent', requireAuth, async (req: Request, res: Response) => {
-    const userId = (req as Request & { userId?: string }).userId!;
-    const { orderId } = req.body as { orderId?: string };
+  res.json({
+    paymentId: payment.id,
+    clientToken: intent.clientToken,
+    providerData: intent.providerData,
+  });
+});
 
-    if (!orderId) { res.status(400).json({ error: 'orderId is required' }); return; }
+// ── Verify & capture ──────────────────────────────────────────────────────────
 
-    const order = await commerce.getOrder(orderId);
-    if (!order || order.userId !== userId) {
-      res.status(404).json({ error: 'Order not found' }); return;
+router.post('/commerce/payments/verify', requireAuth, async (req: Request, res: Response) => {
+  const userId = (req as Request & { userId?: string }).userId!;
+  const { paymentId, providerTransactionId, providerReceipt } = req.body as {
+    paymentId?: string; providerTransactionId?: string; providerReceipt?: unknown;
+  };
+
+  if (!paymentId) { res.status(400).json({ error: 'paymentId is required' }); return; }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { rows: pmtRows } = await client.query<{
+      id: string; order_id: string; user_id: string; provider: string;
+      amount_cents: number; currency: string;
+    }>(
+      `SELECT id, order_id, user_id, provider, amount_cents, currency
+       FROM payments WHERE id = $1`,
+      [paymentId],
+    );
+    const pmt = pmtRows[0];
+    if (!pmt || pmt.user_id !== userId) {
+      await client.query('ROLLBACK');
+      res.status(404).json({ error: 'Payment not found' }); return;
     }
-    if (order.status !== 'pending') {
-      res.status(409).json({ error: 'Order is not in pending state' }); return;
+
+    const order = await commerce.getOrder(pmt.order_id);
+    if (!order) {
+      await client.query('ROLLBACK');
+      res.status(404).json({ error: 'Order not found' }); return;
     }
 
     const provider = getProvider(order.platform as PaymentPlatform);
     if (!provider) {
-      res.status(503).json({ error: `Payment provider for platform '${order.platform}' is not enabled` });
-      return;
-    }
-
-    const productData = await commerce.getProductWithPrices(order.productId);
-
-    const intent = await provider.createPaymentIntent({
-      orderId: order.id,
-      userId,
-      amountCents: order.amountCents,
-      currency: order.currency,
-      productId: order.productId,
-      productName: productData?.product.name ?? order.productId,
-    });
-
-    const payment = await commerce.createPayment({
-      orderId: order.id,
-      userId,
-      provider: provider.name,
-      amountCents: order.amountCents,
-      currency: order.currency,
-    });
-
-    res.json({ paymentId: payment.id, clientToken: intent.clientToken, providerData: intent.providerData });
-  });
-
-  // ── Verify & capture ────────────────────────────────────────────────────────
-
-  router.post('/commerce/payments/verify', requireAuth, async (req: Request, res: Response) => {
-    const userId = (req as Request & { userId?: string }).userId!;
-    const { paymentId, providerTransactionId, providerReceipt } = req.body as {
-      paymentId?: string; providerTransactionId?: string; providerReceipt?: unknown;
-    };
-
-    if (!paymentId) { res.status(400).json({ error: 'paymentId is required' }); return; }
-
-    // Fetch order via payment → not directly exposed here, so use order lookup after verify
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-
-      const { rows: pmtRows } = await client.query<{
-        id: string; order_id: string; user_id: string; provider: string; amount_cents: number; currency: string;
-      }>(
-        `SELECT id, order_id, user_id, provider, amount_cents, currency FROM payments WHERE id = $1`,
-        [paymentId],
-      );
-      const pmt = pmtRows[0];
-      if (!pmt || pmt.user_id !== userId) {
-        await client.query('ROLLBACK');
-        res.status(404).json({ error: 'Payment not found' }); return;
-      }
-
-      const order = await commerce.getOrder(pmt.order_id);
-      if (!order) {
-        await client.query('ROLLBACK');
-        res.status(404).json({ error: 'Order not found' }); return;
-      }
-
-      const provider = getProvider(order.platform as PaymentPlatform);
-      if (!provider) {
-        await client.query('ROLLBACK');
-        res.status(503).json({ error: 'Provider not enabled' }); return;
-      }
-
-      const result = await provider.verifyAndCapture({
-        orderId: order.id, userId, providerTransactionId, providerReceipt,
-      });
-
-      if (!result.success) {
-        await client.query('ROLLBACK');
-        res.status(402).json({ error: 'Payment verification failed' }); return;
-      }
-
-      await commerce.completePayment(paymentId, result.providerTransactionId, result.rawResponse, client);
-
-      await entitlements.grant({
-        userId, productId: order.productId, source: 'purchase', paymentId,
-      });
-
-      await client.query('COMMIT');
-      res.json({ success: true, providerTransactionId: result.providerTransactionId });
-    } catch (err) {
       await client.query('ROLLBACK');
-      throw err;
-    } finally {
-      client.release();
+      res.status(503).json({ error: 'Provider not enabled' }); return;
     }
-  });
 
-  // ── Webhooks (no auth — signature verified by provider) ─────────────────────
+    const result = await provider.verifyAndCapture({
+      orderId: order.id, userId, providerTransactionId, providerReceipt,
+    });
 
-  router.post('/commerce/webhooks/:provider', async (req: Request, res: Response) => {
-    const providerName = req.params['provider'];
-    const headers = Object.fromEntries(
-      Object.entries(req.headers).map(([k, v]) => [k, String(v ?? '')]),
+    if (!result.success) {
+      await client.query('ROLLBACK');
+      res.status(402).json({ error: 'Payment verification failed' }); return;
+    }
+
+    await commerce.completePayment(
+      paymentId,
+      result.providerTransactionId,
+      result.rawResponse,
+      client,
     );
 
-    const provider = getAllProviders().find((p) => p.name === providerName && p.enabled);
-    if (!provider) {
-      res.status(404).json({ error: 'Provider not found or not enabled' }); return;
-    }
+    await entitlements.grant({
+      userId,
+      productId: order.productId,
+      source: 'purchase',
+      paymentId,
+    });
 
-    const event = await provider.handleWebhook(req.body, headers);
+    await client.query('COMMIT');
+    res.json({ success: true, providerTransactionId: result.providerTransactionId });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+});
 
-    // TODO: dispatch event to order/subscription reconciliation logic
-    console.log('[commerce] webhook event', event);
+// ── Webhooks (no auth — signature verified by provider) ───────────────────────
 
-    res.json({ received: true });
+router.post('/commerce/webhooks/:provider', async (req: Request, res: Response) => {
+  const providerName = req.params['provider'];
+  const headers = Object.fromEntries(
+    Object.entries(req.headers).map(([k, v]) => [k, String(v ?? '')]),
+  );
+
+  const provider = getAllProviders().find((p) => p.name === providerName && p.enabled);
+  if (!provider) {
+    res.status(404).json({ error: 'Provider not found or not enabled' }); return;
+  }
+
+  const event = await provider.handleWebhook(req.body, headers);
+
+  // TODO: dispatch event to order/subscription reconciliation logic
+  console.log('[commerce] webhook event', event);
+
+  res.json({ received: true });
+});
+
+// ── Inventory ─────────────────────────────────────────────────────────────────
+
+router.get('/commerce/inventory', requireAuth, async (req: Request, res: Response) => {
+  const userId = (req as Request & { userId?: string }).userId!;
+  const items = await commerce.getUserInventory(userId);
+  res.json({ items });
+});
+
+// ── Entitlements ──────────────────────────────────────────────────────────────
+
+router.get('/commerce/entitlements', requireAuth, async (req: Request, res: Response) => {
+  const userId = (req as Request & { userId?: string }).userId!;
+  const items = await entitlements.listEntitlements(userId);
+  res.json({ entitlements: items });
+});
+
+// ── Wallet ────────────────────────────────────────────────────────────────────
+
+router.get('/commerce/wallet', requireAuth, async (req: Request, res: Response) => {
+  const userId = (req as Request & { userId?: string }).userId!;
+  const wallet = await commerce.getOrCreateWallet(userId);
+  res.json({ wallet });
+});
+
+// ── Admin stubs (Phase 2) ─────────────────────────────────────────────────────
+
+router.get('/commerce/admin/orders', requireAuth, async (_req, res) => {
+  res.status(501).json({ error: 'Admin order listing not yet implemented' });
+});
+
+/** Returns the status of every registered payment provider. */
+router.get('/commerce/admin/providers', requireAuth, async (_req, res) => {
+  const providers = getAllProviders().map((p) => ({
+    name: p.name,
+    platform: p.platform,
+    enabled: p.enabled,
+  }));
+  res.json({ providers });
+});
+
+router.post('/commerce/admin/refund', requireAuth, async (_req, res) => {
+  res.status(501).json({ error: 'Admin refund not yet implemented' });
+});
+
+router.post('/commerce/admin/entitlements/grant', requireAuth, async (req: Request, res: Response) => {
+  const { userId: targetUserId, productId } = req.body as {
+    userId?: string; productId?: string;
+  };
+  if (!targetUserId || !productId) {
+    res.status(400).json({ error: 'userId and productId are required' }); return;
+  }
+  const e = await entitlements.grant({
+    userId: targetUserId, productId, source: 'admin',
   });
-
-  // ── User inventory & entitlements ───────────────────────────────────────────
-
-  router.get('/commerce/inventory', requireAuth, async (req: Request, res: Response) => {
-    const userId = (req as Request & { userId?: string }).userId!;
-    const items = await commerce.getUserInventory(userId);
-    res.json({ items });
-  });
-
-  router.get('/commerce/entitlements', requireAuth, async (req: Request, res: Response) => {
-    const userId = (req as Request & { userId?: string }).userId!;
-    const items = await entitlements.listEntitlements(userId);
-    res.json({ entitlements: items });
-  });
-
-  // ── Admin stubs (Phase 2) ────────────────────────────────────────────────────
-
-  router.get('/commerce/admin/orders', requireAuth, async (_req, res) => {
-    res.status(501).json({ error: 'Admin order listing not yet implemented' });
-  });
-
-  router.post('/commerce/admin/refund', requireAuth, async (_req, res) => {
-    res.status(501).json({ error: 'Admin refund not yet implemented' });
-  });
-
-  router.post('/commerce/admin/entitlements/grant', requireAuth, async (req: Request, res: Response) => {
-    const { userId: targetUserId, productId } = req.body as { userId?: string; productId?: string };
-    if (!targetUserId || !productId) {
-      res.status(400).json({ error: 'userId and productId are required' }); return;
-    }
-    const e = await entitlements.grant({ userId: targetUserId, productId, source: 'admin' });
-    res.json({ entitlement: e });
-  });
+  res.json({ entitlement: e });
+});
 
 router.delete('/commerce/admin/entitlements/revoke', requireAuth, async (req: Request, res: Response) => {
-  const { userId: targetUserId, productId } = req.body as { userId?: string; productId?: string };
+  const { userId: targetUserId, productId } = req.body as {
+    userId?: string; productId?: string;
+  };
   if (!targetUserId || !productId) {
     res.status(400).json({ error: 'userId and productId are required' }); return;
   }
   await entitlements.revoke(targetUserId, productId);
   res.json({ success: true });
+});
+
+/** Admin: credit a user's wallet (e.g. for support compensation, promotions). */
+router.post('/commerce/admin/wallet/credit', requireAuth, async (req: Request, res: Response) => {
+  const { userId: targetUserId, amount, currency, description } = req.body as {
+    userId?: string; amount?: number; currency?: string; description?: string;
+  };
+  if (!targetUserId || !amount || amount <= 0) {
+    res.status(400).json({ error: 'userId and a positive amount are required' }); return;
+  }
+  const tx = await commerce.creditWallet({
+    userId: targetUserId,
+    amount,
+    currency: currency ?? 'coins',
+    description: description ?? 'Admin credit',
+  });
+  res.json({ transaction: tx });
 });
 
 export default router;

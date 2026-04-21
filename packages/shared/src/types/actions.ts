@@ -1,4 +1,4 @@
-import type { Card, Meld, MeldType } from './game.js';
+import type { Card, MeldType } from './game.js';
 
 /**
  * Discriminated union of every action a player can submit during their turn.

@@ -1,6 +1,7 @@
 import pg from 'pg';
 
 import { config } from '../config/index.js';
+import { logger } from '../logger.js';
 
 const { Pool } = pg;
 
@@ -12,7 +13,7 @@ export const pool = new Pool({
 });
 
 pool.on('error', (err) => {
-  console.error('Unexpected pg pool error', err);
+  logger.error({ err }, 'Unexpected pg pool error');
 });
 
 export async function query<T extends pg.QueryResultRow>(
@@ -23,7 +24,7 @@ export async function query<T extends pg.QueryResultRow>(
   const result = await pool.query<T>(text, params);
   const duration = Date.now() - start;
   if (config.nodeEnv === 'development') {
-    console.debug('query', { text, duration, rows: result.rowCount });
+    logger.debug({ sql: text.slice(0, 80), duration, rows: result.rowCount }, 'query');
   }
   return result;
 }
