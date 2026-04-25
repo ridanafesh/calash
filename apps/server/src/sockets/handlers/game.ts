@@ -84,7 +84,15 @@ export async function handleGameAction(
 
   const result = await applyPlayerAction(room, playerId, action, io);
   if (!result.ok) {
-    socket.emit('room:error', { code: 'INVALID_ACTION', message: result.error });
+    // Pass structured failure metadata through. AMBIGUOUS_JOKER_ASSIGNMENT
+    // carries the legal joker candidates so the UI can open a picker dialog
+    // instead of just showing a banner.
+    socket.emit('room:error', {
+      code: result.errorCode ?? 'INVALID_ACTION',
+      message: result.error,
+      ...(result.candidates ? { candidates: result.candidates } : {}),
+      ...(result.meldIndex !== undefined ? { meldIndex: result.meldIndex } : {}),
+    });
     return;
   }
   // Send the actor's private hand directly to their socket.
@@ -110,7 +118,13 @@ async function applyPlayerAction(
   io: CalashServer,
 ): Promise<
   | { ok: true; handAfter: import('@calash/shared').Card[]; roundEnded: boolean }
-  | { ok: false; error: string }
+  | {
+      ok: false;
+      error: string;
+      errorCode?: 'AMBIGUOUS_JOKER_ASSIGNMENT';
+      candidates?: import('@calash/shared').JokerAssignment[];
+      meldIndex?: number;
+    }
 > {
   if (!room.round) return { ok: false, error: 'No active round.' };
   const { applyTurnAction, toRoundStateView } = await import('@calash/game-core');
@@ -126,7 +140,13 @@ async function applyPlayerAction(
   const result = applyTurnAction(state, playerId, action, () => randomUUID());
   if (!result.ok) {
     console.warn(`[game] Invalid action by ${playerId} in round ${roundId}: ${result.error}`);
-    return { ok: false, error: result.error };
+    return {
+      ok: false,
+      error: result.error,
+      ...(result.errorCode ? { errorCode: result.errorCode } : {}),
+      ...(result.candidates ? { candidates: result.candidates } : {}),
+      ...(result.meldIndex !== undefined ? { meldIndex: result.meldIndex } : {}),
+    };
   }
 
   const { state: newState, roundResult } = result;
@@ -151,13 +171,13 @@ async function applyPlayerAction(
       highestTableTotal: newState.highestTableTotal,
     });
 
-    if (['go-down', 'add-to-meld', 'add-new-meld'].includes(action.type)) {
+    if (['go-down', 'add-to-meld', 'add-new-meld', 'replace-joker'].includes(action.type)) {
       await db.rounds.updateHand(roundId, playerId, {
         cards: newPs.hand,
         hasGoneDown: newPs.hasGoneDown,
         tableTotal: newPs.tableTotal,
       });
-      await persistMelds(roundId, playerId, action, newPs);
+      await persistMelds(roundId, playerId, action, newState);
     }
   } catch (err) {
     console.error(`[game] DB persistence failed for ${action.type} by ${playerId} in round ${roundId}:`, err);
@@ -170,12 +190,76 @@ async function applyPlayerAction(
   room.round.state = newState;
   io.to(room.roomId).emit('game:state', toRoundStateView(newState));
 
+  // ── Private drawn-card delivery ──────────────────────────────────────────
+  // The broadcast view above redacts pendingDrawnCard. Send the actual card
+  // to ONLY the owning player's socket so opponents never see what was drawn.
+  // Bots have no socket — they read state directly from room.round.state, so
+  // there's nothing to send to them.
+  await sendDrawnCardPrivately(room, action, newState, io);
+
   if (roundResult) {
     await handleRoundEnd(room.roomId, io);
     return { ok: true, handAfter: newPs.hand, roundEnded: true };
   }
 
   return { ok: true, handAfter: newPs.hand, roundEnded: false };
+}
+
+/**
+ * After applyPlayerAction broadcasts the redacted state, deliver the
+ * private drawn-card preview to the owning player's socket only.
+ *
+ *   draw-from-deck            → send the new pending card to the drawer
+ *   keep-drawn-card           → send null to clear the drawer's preview
+ *   discard-drawn-card        → send null to clear the drawer's preview
+ *   take-from-discard, etc.   → no-op (no pending state to advertise)
+ *
+ * Idempotent w.r.t. the broadcast view — the room-wide game:state emit
+ * already conveys "pending state exists" via pendingDrawnCardPresent.
+ */
+async function sendDrawnCardPrivately(
+  room: RoomState,
+  action: TurnAction,
+  newState: import('@calash/shared').RoundState,
+  io: CalashServer,
+): Promise<void> {
+  if (action.type === 'draw-from-deck') {
+    // Owner is whoever just drew — they're still the current turn player.
+    const ownerId = newState.currentTurnPlayerId;
+    const slot = room.players.find((p) => p.userId === ownerId);
+    if (slot && !slot.isBot && slot.socketId && newState.pendingDrawnCard) {
+      io.to(slot.socketId).emit('game:drawn-card', newState.pendingDrawnCard);
+    }
+    return;
+  }
+
+  if (action.type === 'keep-drawn-card' || action.type === 'discard-drawn-card') {
+    // The drawer is who acted. After Keep they're still the active player
+    // (now in 'holding'); after Discard the turn has advanced. In both
+    // cases their preview should clear.
+    const ownerId = action.type === 'keep-drawn-card'
+      ? newState.currentTurnPlayerId
+      // discard-drawn-card → turn advanced → owner is now the PREVIOUS player.
+      : previousPlayerId(newState);
+    const slot = room.players.find((p) => p.userId === ownerId);
+    if (slot && !slot.isBot && slot.socketId) {
+      io.to(slot.socketId).emit('game:drawn-card', null);
+    }
+    return;
+  }
+}
+
+/**
+ * Find the player who acted last by looking one position BACK in turn
+ * order from the current player. Used after a turn-ending action to
+ * locate the player who just finished, so we can clear their private
+ * drawn-card preview.
+ */
+function previousPlayerId(state: import('@calash/shared').RoundState): string {
+  const order = state.playerOrder;
+  const idx = order.indexOf(state.currentTurnPlayerId);
+  const prev = (idx - 1 + order.length) % order.length;
+  return order[prev];
 }
 
 // ─── Bot turn driver ─────────────────────────────────────────────────────────
@@ -325,8 +409,9 @@ async function persistMelds(
   roundId: string,
   userId: string,
   action: TurnAction,
-  ps: import('@calash/shared').PlayerRoundState,
+  newState: import('@calash/shared').RoundState,
 ): Promise<void> {
+  const ps = newState.playerStates[userId];
   if (action.type === 'go-down') {
     // Pass the engine-assigned UUIDs so the DB primary key matches the
     // in-memory id. Otherwise subsequent add-to-meld fails with a pg
@@ -334,7 +419,12 @@ async function persistMelds(
     await db.melds.createMelds({
       roundId,
       ownerUserId: userId,
-      melds: ps.melds.map((m) => ({ id: m.id, type: m.type, cards: [...m.cards] })),
+      melds: ps.melds.map((m) => ({
+        id: m.id,
+        type: m.type,
+        cards: [...m.cards],
+        ...(m.jokerAssignment ? { jokerAssignment: m.jokerAssignment } : {}),
+      })),
       newHand: ps.hand,
       newTableTotal: ps.tableTotal,
     });
@@ -344,12 +434,21 @@ async function persistMelds(
       await db.melds.createMelds({
         roundId,
         ownerUserId: userId,
-        melds: [{ id: meld.id, type: meld.type, cards: [...meld.cards] }],
+        melds: [{
+          id: meld.id,
+          type: meld.type,
+          cards: [...meld.cards],
+          ...(meld.jokerAssignment ? { jokerAssignment: meld.jokerAssignment } : {}),
+        }],
         newHand: ps.hand,
         newTableTotal: ps.tableTotal,
       });
     }
   } else if (action.type === 'add-to-meld') {
+    // Look up the post-update meld so we can persist its (possibly new)
+    // jokerAssignment — necessary when the player just added a joker to
+    // a previously joker-less meld.
+    const updatedMeld = findMeldInState(newState, action.meldId);
     await db.melds.addCardsToMeld({
       meldId: action.meldId,
       roundId,
@@ -357,8 +456,69 @@ async function persistMelds(
       newCards: [...action.cards],
       newHand: ps.hand,
       newTableTotal: ps.tableTotal,
+      jokerAssignment: updatedMeld?.jokerAssignment ?? undefined,
+    });
+  } else if (action.type === 'replace-joker') {
+    // Replace-joker can target a meld owned by a different player. Look up
+    // the meld's owner so we can update their table_total too.
+    const ownerId = findOwnerOfMeld(newState, action.meldId);
+    const updatedMeld = findMeldInState(newState, action.meldId);
+    if (!ownerId || !updatedMeld) return; // engine just produced these — defensive only
+
+    // Locate the position the joker occupied. We have the post-state cards;
+    // the joker has already been swapped out. Compare against the action's
+    // replacement card via deckIndex+rank+suit to find where it landed.
+    const repl = action.replacementCard;
+    let position = -1;
+    for (let i = 0; i < updatedMeld.cards.length; i++) {
+      const c = updatedMeld.cards[i];
+      if (
+        !c.isJoker &&
+        !repl.isJoker &&
+        c.rank === repl.rank &&
+        c.suit === repl.suit &&
+        c.deckIndex === repl.deckIndex
+      ) {
+        position = i;
+        break;
+      }
+    }
+    if (position === -1) return; // shouldn't happen — engine guaranteed the swap
+
+    const ownerPs = newState.playerStates[ownerId];
+    await db.melds.replaceJokerInMeld({
+      meldId: action.meldId,
+      roundId,
+      actorUserId: userId,
+      ownerUserId: ownerId,
+      newMeldCards: [...updatedMeld.cards],
+      jokerPosition: position,
+      replacementCard: action.replacementCard,
+      actorNewHand: ps.hand,
+      ownerNewTableTotal: ownerPs.tableTotal,
     });
   }
+}
+
+function findMeldInState(
+  state: import('@calash/shared').RoundState,
+  meldId: string,
+): import('@calash/shared').Meld | undefined {
+  for (const ps of Object.values(state.playerStates)) {
+    const m = ps.melds.find((mm) => mm.id === meldId);
+    if (m) return m;
+  }
+  return undefined;
+}
+
+function findOwnerOfMeld(
+  state: import('@calash/shared').RoundState,
+  meldId: string,
+): string | undefined {
+  for (const [pid, ps] of Object.entries(state.playerStates)) {
+    if (ps.melds.some((m) => m.id === meldId)) return pid;
+  }
+  return undefined;
 }
 
 // ─── Round end ────────────────────────────────────────────────────────────────

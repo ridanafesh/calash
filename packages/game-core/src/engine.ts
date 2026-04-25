@@ -19,21 +19,42 @@ import type {
   Meld,
   MeldType,
   Card,
+  JokerAssignment,
+  RegularCard,
   RoundEndReason,
 } from '@calash/shared';
 import { GAME_CONFIG } from '@calash/shared';
-import { createDeck, shuffleDeck, dealHands, removeCardsFromHand } from './deck.js';
+import { createDeck, shuffleDeck, dealHands, removeCardsFromHand, isSameCard } from './deck.js';
 import { validateTurnAction } from './rules/turn.js';
 import type { TurnContext } from './rules/turn.js';
 import { applyTakeFromDiscard } from './rules/discard.js';
-import { totalCardValue, totalMeldValue } from './meld.js';
+import {
+  totalCardValue,
+  totalMeldValue,
+  resolveJokerAssignment,
+  validateMeld,
+} from './meld.js';
 import { computeRoundResult } from './scoring.js';
 
 // ─── Public result type ───────────────────────────────────────────────────────
 
+/**
+ * Optional structured failure metadata. The string `error` field is always
+ * populated and is what the server surfaces to humans; the optional
+ * `errorCode` + `candidates` let the socket layer pass through specific
+ * failures (currently only AMBIGUOUS_JOKER_ASSIGNMENT) to the UI in a way
+ * the client can react to programmatically (open a picker dialog) instead
+ * of just showing a banner.
+ */
 export type ApplyResult =
   | { ok: true; state: RoundState; roundResult?: RoundResult }
-  | { ok: false; error: string };
+  | {
+      ok: false;
+      error: string;
+      errorCode?: 'AMBIGUOUS_JOKER_ASSIGNMENT';
+      candidates?: JokerAssignment[];
+      meldIndex?: number;
+    };
 
 // ─── Round initialisation ────────────────────────────────────────────────────
 
@@ -213,6 +234,7 @@ function dispatch(
     case 'go-down':              return applyGoDown(state, playerId, action, generateId);
     case 'add-to-meld':          return applyAddToMeld(state, playerId, action);
     case 'add-new-meld':         return applyAddNewMeld(state, playerId, action, generateId);
+    case 'replace-joker':        return applyReplaceJoker(state, playerId, action);
     case 'discard':              return applyDiscard(state, playerId, action);
     case 'keep-drawn-card':      return applyKeepDrawnCard(state, playerId);
     case 'discard-drawn-card':   return applyDiscardDrawnCard(state, playerId);
@@ -349,17 +371,45 @@ function applyTakeDiscard(
 function applyGoDown(
   state: RoundState,
   playerId: string,
-  action: { melds: ReadonlyArray<{ type: MeldType; cards: readonly Card[] }> },
+  action: {
+    melds: ReadonlyArray<{
+      type: MeldType;
+      cards: readonly Card[];
+      jokerAssignment?: JokerAssignment;
+    }>;
+  },
   generateId: () => string,
 ): ApplyResult {
   const ps = state.playerStates[playerId];
 
-  const newMelds: Meld[] = action.melds.map((m) => ({
-    id: generateId(),
-    type: m.type,
-    cards: [...m.cards],
-    totalValue: totalCardValue(m.cards),
-  }));
+  // Resolve joker assignment for each meld up front. If any meld is ambiguous
+  // and the client did not supply an assignment, fail with structured info so
+  // the UI can prompt — without this, the UI would never know which meld to
+  // ask about.
+  const newMelds: Meld[] = [];
+  for (let i = 0; i < action.melds.length; i++) {
+    const m = action.melds[i];
+    const resolved = resolveJokerAssignment(m.type, m.cards, m.jokerAssignment);
+    if (!resolved.ok) {
+      if (resolved.ambiguous) {
+        return {
+          ok: false,
+          error: 'Joker placement is ambiguous — choose what the joker represents',
+          errorCode: 'AMBIGUOUS_JOKER_ASSIGNMENT',
+          candidates: resolved.candidates,
+          meldIndex: i,
+        };
+      }
+      return { ok: false, error: resolved.reason };
+    }
+    newMelds.push({
+      id: generateId(),
+      type: m.type,
+      cards: [...m.cards],
+      totalValue: totalCardValue(m.cards),
+      ...(resolved.assignment ? { jokerAssignment: resolved.assignment } : {}),
+    });
+  }
 
   const allPlayedCards = action.melds.flatMap((m) => [...m.cards]);
   const newHand = removeCardsFromHand(ps.hand, allPlayedCards);
@@ -390,13 +440,44 @@ function applyGoDown(
 function applyAddToMeld(
   state: RoundState,
   playerId: string,
-  action: { meldId: string; cards: readonly Card[] },
+  action: { meldId: string; cards: readonly Card[]; jokerAssignment?: JokerAssignment },
 ): ApplyResult {
   const ownerId = findMeldOwner(state, action.meldId);
   if (!ownerId) return { ok: false, error: `Meld '${action.meldId}' not found` };
 
   const actorPs = state.playerStates[playerId];
   const ownerPs = state.playerStates[ownerId];
+
+  // Locate the existing meld so we can compute the post-state assignment.
+  const existingMeld = ownerPs.melds.find((m) => m.id === action.meldId);
+  if (!existingMeld) return { ok: false, error: `Meld '${action.meldId}' not found` };
+
+  const updatedCardsForMeld = [...existingMeld.cards, ...action.cards];
+
+  // Decide what the joker assignment of the resulting meld should be.
+  //   - No joker added, no existing joker → no assignment.
+  //   - No joker added, existing assignment → keep it (real cards added in
+  //     other positions don't change the joker's role).
+  //   - Joker added to a meld that already has a joker → rejected by validator.
+  //   - Joker added to a meld with no joker → resolve fresh (may need
+  //     client-supplied choice if ambiguous).
+  let nextAssignment: JokerAssignment | undefined = existingMeld.jokerAssignment;
+  const addedJoker = action.cards.some((c) => c.isJoker);
+  if (addedJoker && !existingMeld.jokerAssignment) {
+    const resolved = resolveJokerAssignment(existingMeld.type, updatedCardsForMeld, action.jokerAssignment);
+    if (!resolved.ok) {
+      if (resolved.ambiguous) {
+        return {
+          ok: false,
+          error: 'Joker placement is ambiguous — choose what the joker represents',
+          errorCode: 'AMBIGUOUS_JOKER_ASSIGNMENT',
+          candidates: resolved.candidates,
+        };
+      }
+      return { ok: false, error: resolved.reason };
+    }
+    nextAssignment = resolved.assignment;
+  }
 
   // Remove played cards from actor's hand.
   const newActorHand = removeCardsFromHand(actorPs.hand, [...action.cards]);
@@ -405,8 +486,15 @@ function applyAddToMeld(
   const addedValue = totalCardValue(action.cards);
   const updatedOwnerMelds = ownerPs.melds.map((m) => {
     if (m.id !== action.meldId) return m;
-    const updatedCards = [...m.cards, ...action.cards];
-    return { ...m, cards: updatedCards, totalValue: totalCardValue(updatedCards) };
+    const next: Meld = {
+      ...m,
+      cards: updatedCardsForMeld,
+      totalValue: totalCardValue(updatedCardsForMeld),
+    };
+    // Drop the assignment field entirely if no joker remains; otherwise
+    // re-attach (preserves existing or applies the freshly resolved one).
+    if (nextAssignment) (next as { jokerAssignment?: JokerAssignment }).jokerAssignment = nextAssignment;
+    return next;
   });
 
   // Cards added to ANY meld count toward the contributor's tableTotal.
@@ -446,16 +534,32 @@ function applyAddToMeld(
 function applyAddNewMeld(
   state: RoundState,
   playerId: string,
-  action: { meld: { type: MeldType; cards: readonly Card[] } },
+  action: {
+    meld: { type: MeldType; cards: readonly Card[]; jokerAssignment?: JokerAssignment };
+  },
   generateId: () => string,
 ): ApplyResult {
   const ps = state.playerStates[playerId];
+
+  const resolved = resolveJokerAssignment(action.meld.type, action.meld.cards, action.meld.jokerAssignment);
+  if (!resolved.ok) {
+    if (resolved.ambiguous) {
+      return {
+        ok: false,
+        error: 'Joker placement is ambiguous — choose what the joker represents',
+        errorCode: 'AMBIGUOUS_JOKER_ASSIGNMENT',
+        candidates: resolved.candidates,
+      };
+    }
+    return { ok: false, error: resolved.reason };
+  }
 
   const newMeld: Meld = {
     id: generateId(),
     type: action.meld.type,
     cards: [...action.meld.cards],
     totalValue: totalCardValue(action.meld.cards),
+    ...(resolved.assignment ? { jokerAssignment: resolved.assignment } : {}),
   };
 
   const newHand = removeCardsFromHand(ps.hand, [...action.meld.cards]);
@@ -475,6 +579,166 @@ function applyAddNewMeld(
     },
   };
 }
+
+// ─── replace-joker ────────────────────────────────────────────────────────────
+
+/**
+ * Replace the joker inside a table meld with the real card it represents,
+ * returning the joker to the actor's hand.
+ *
+ * Sequences: legal whenever the actor holds the exact rank+suit the joker
+ * is assigned to. The replacement card slots into the joker's position and
+ * the joker rejoins the actor's hand. The meld type, suit, and run-shape
+ * are unchanged so the resulting meld stays valid by construction; we
+ * still re-validate as a safety net.
+ *
+ * Sets: the spec is strict — the joker can only be reclaimed when the
+ * meld is being completed to a natural 4-suit set. That means BEFORE this
+ * action runs, the meld must already contain the 3 OTHER real suits (so
+ * exactly: joker + 3 reals = 4 cards), and the actor's replacement card
+ * must be the 4th missing suit (which equals the joker's representsSuit).
+ * Adding a single new suit to a 3-card joker set is not enough — the
+ * player must first add the 3rd real suit via add-to-meld, then reclaim.
+ */
+function applyReplaceJoker(
+  state: RoundState,
+  playerId: string,
+  action: { meldId: string; replacementCard: Card },
+): ApplyResult {
+  if (action.replacementCard.isJoker) {
+    return { ok: false, error: 'Replacement card cannot itself be a joker' };
+  }
+
+  const ownerId = findMeldOwner(state, action.meldId);
+  if (!ownerId) return { ok: false, error: `Meld '${action.meldId}' not found` };
+
+  const actorPs = state.playerStates[playerId];
+  const ownerPs = state.playerStates[ownerId];
+  const meld = ownerPs.melds.find((m) => m.id === action.meldId);
+  if (!meld) return { ok: false, error: `Meld '${action.meldId}' not found` };
+
+  const assignment = meld.jokerAssignment;
+  if (!assignment) {
+    return { ok: false, error: 'This meld does not contain a joker to replace' };
+  }
+
+  // Locate the joker card inside the meld.
+  const jokerIdx = meld.cards.findIndex((c) => c.isJoker && c.jokerIndex === assignment.jokerIndex);
+  if (jokerIdx === -1) {
+    // Defensive — assignment present but joker missing → state is corrupt.
+    return { ok: false, error: 'Meld is in an inconsistent state (joker assignment without joker)' };
+  }
+  const jokerCard = meld.cards[jokerIdx] as JokerCardLite;
+
+  // Replacement must be in the actor's hand.
+  const handIdx = actorPs.hand.findIndex((c) => isSameCard(c, action.replacementCard));
+  if (handIdx === -1) {
+    return { ok: false, error: 'Replacement card is not in your hand' };
+  }
+  const replacement = actorPs.hand[handIdx] as RegularCard;
+  if (replacement.isJoker) {
+    return { ok: false, error: 'Replacement card cannot itself be a joker' };
+  }
+
+  if (meld.type === 'sequence') {
+    if (replacement.rank !== assignment.representsRank || replacement.suit !== assignment.representsSuit) {
+      return {
+        ok: false,
+        error: `This joker stands for ${assignment.representsRank} of ${assignment.representsSuit}; the replacement must match exactly`,
+      };
+    }
+  } else {
+    // SET reclaim rule: meld must currently have joker + the 3 OTHER real
+    // suits, and the replacement must be the 4th (missing) suit.
+    if (replacement.rank !== assignment.representsRank) {
+      return {
+        ok: false,
+        error: `Replacement card must be a ${assignment.representsRank} to complete this set`,
+      };
+    }
+    if (replacement.suit !== assignment.representsSuit) {
+      return {
+        ok: false,
+        error: `This joker stands for ${assignment.representsRank} of ${assignment.representsSuit}; the replacement must be that suit`,
+      };
+    }
+    const realCardsInMeld = meld.cards.filter((c): c is RegularCard => !c.isJoker);
+    const realSuitsPresent = new Set(realCardsInMeld.map((c) => c.suit));
+    if (realSuitsPresent.size < 3) {
+      return {
+        ok: false,
+        error:
+          'Cannot reclaim joker yet — the set must contain the other three real suits before the joker can be swapped',
+      };
+    }
+  }
+
+  // Build the post-state meld: replace the joker in place.
+  const newMeldCards = [...meld.cards.slice(0, jokerIdx), replacement, ...meld.cards.slice(jokerIdx + 1)];
+  // Sanity-validate; this should always pass by construction.
+  const validity = validateMeld(meld.type, newMeldCards);
+  if (!validity.valid) {
+    return { ok: false, error: validity.reason ?? 'Resulting meld would be invalid' };
+  }
+
+  const updatedOwnerMelds = ownerPs.melds.map((m) => {
+    if (m.id !== meld.id) return m;
+    const next: Meld = {
+      id: m.id,
+      type: m.type,
+      cards: newMeldCards,
+      totalValue: totalCardValue(newMeldCards),
+    };
+    return next; // jokerAssignment intentionally omitted — joker has left
+  });
+
+  // Joker comes back to the actor's hand; replacement card leaves the hand.
+  const newActorHand = [
+    ...actorPs.hand.slice(0, handIdx),
+    ...actorPs.hand.slice(handIdx + 1),
+    jokerCard,
+  ];
+
+  // Recompute the OWNER's tableTotal from melds (the joker was worth 25 in
+  // the meld; the replacement card almost always has a different value, so
+  // the owner's table total changes). Note: we credit the change in value
+  // back to the meld OWNER, not the actor — the meld still belongs to the
+  // owner; the actor merely swapped a card. This mirrors how scoring views
+  // who owns the meld.
+  const newOwnerTableTotal = totalMeldValue(updatedOwnerMelds.filter((m) =>
+    ownerPs.melds.some((om) => om.id === m.id),
+  ));
+
+  let newPlayerStates: RoundState['playerStates'];
+  if (ownerId === playerId) {
+    newPlayerStates = {
+      ...state.playerStates,
+      [playerId]: {
+        ...actorPs,
+        hand: newActorHand,
+        melds: updatedOwnerMelds,
+        tableTotal: newOwnerTableTotal,
+      },
+    };
+  } else {
+    newPlayerStates = {
+      ...state.playerStates,
+      [ownerId]: { ...ownerPs, melds: updatedOwnerMelds, tableTotal: newOwnerTableTotal },
+      [playerId]: { ...actorPs, hand: newActorHand },
+    };
+  }
+
+  // highestTableTotal can decrease here in principle (joker is 25 → real
+  // card might be worth less), but the canonical highestTableTotal tracks
+  // the maximum reached so far for the next-opener threshold; we leave it
+  // unchanged so the threshold doesn't drop mid-round. This is intentional.
+
+  return { ok: true, state: { ...state, playerStates: newPlayerStates } };
+}
+
+// JokerCardLite is the type we get back from meld.cards[i] when isJoker is
+// true — duplicated from the shared Card union to keep this file independent.
+type JokerCardLite = { rank: 'JOKER'; suit: null; isJoker: true; jokerIndex: 0 | 1 };
 
 // ─── discard ──────────────────────────────────────────────────────────────────
 
@@ -582,6 +846,11 @@ export function toRoundStateView(state: RoundState): RoundStateView {
     highestTableTotal: state.highestTableTotal,
     endReason: state.endReason,
     finisherPlayerId: state.finisherPlayerId,
-    pendingDrawnCard: state.pendingDrawnCard,
+    // PRIVACY: only the OWNER of the pending draw decision should see the
+    // actual card. Broadcast view exposes a boolean only — opponents need
+    // to know the state exists (to render "X is deciding…") but must not
+    // see the card identity. The owner gets the card via the dedicated
+    // private 'game:drawn-card' socket event.
+    pendingDrawnCardPresent: state.pendingDrawnCard !== undefined,
   };
 }

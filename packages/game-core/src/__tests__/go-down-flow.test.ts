@@ -296,7 +296,11 @@ describe('Go-down opening — state after a successful submit', () => {
 
   it('accepts a multi-meld opening that adds up to ≥ threshold', () => {
     // Set: 3 Kings (30) + Sequence: J-Q-K hearts (30). Total = 60 — below 75.
-    // Add a 4th K (40) + a joker in the seq for a J-Q-K-Joker (40). Total 80.
+    // Add a 4th K (40) + a joker in the seq for a J-Q-Joker (40). Total 80.
+    //
+    // The J-Q-Joker placement is AMBIGUOUS post-PR (joker could be 10♠ or
+    // K♠), so we now supply an explicit jokerAssignment to disambiguate.
+    // This mirrors what the UI's JokerAssignmentPicker would send.
     const myHand = [
       rc('K', 'hearts', 0), rc('K', 'diamonds'), rc('K', 'clubs'), rc('K', 'spades', 0),  // set of 4 Kings = 40
       rc('J', 'spades', 1), rc('Q', 'spades'), joker(0),                                  // J-Q-Joker spades = 45
@@ -307,7 +311,11 @@ describe('Go-down opening — state after a successful submit', () => {
       type: 'go-down',
       melds: [
         { type: 'set', cards: [myHand[0], myHand[1], myHand[2], myHand[3]] },
-        { type: 'sequence', cards: [myHand[4], myHand[5], myHand[6]] },
+        {
+          type: 'sequence',
+          cards: [myHand[4], myHand[5], myHand[6]],
+          jokerAssignment: { jokerIndex: 0, representsRank: 'K', representsSuit: 'spades' },
+        },
       ],
     });
     expect(result.ok).toBe(true);

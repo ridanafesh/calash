@@ -152,6 +152,15 @@ export async function restorePlayerToRoom(
     if (ps) {
       socket.emit('game:hand', ps.hand);
     }
+
+    // If the reconnecting player is the one who has a pending drawn-card
+    // decision, restore their private preview. Send null otherwise so any
+    // stale client-side preview is cleared on reconnect.
+    const pendingForMe =
+      state.currentTurnPlayerId === playerId && state.pendingDrawnCard
+        ? state.pendingDrawnCard
+        : null;
+    socket.emit('game:drawn-card', pendingForMe);
   }
 
   console.log(`[room] Player ${playerId} reconnected to room ${room.roomId}`);

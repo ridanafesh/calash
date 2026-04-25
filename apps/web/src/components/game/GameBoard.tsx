@@ -5,13 +5,22 @@ import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
 import { useGame } from '@/lib/game-context';
 import { GAME_CONFIG, CARD_VALUES } from '@calash/shared';
-import type { Card, MeldType } from '@calash/shared';
+import type { Card, JokerAssignment, MeldType, TurnAction, Suit } from '@calash/shared';
 import { CardView, CardBack, cardId, cardEquals } from './CardView';
 import { DiscardInspector } from './DiscardInspector';
 import { HandToolbar } from './HandToolbar';
 import { ScoresPanel } from './ScoresPanel';
+import { JokerAssignmentPicker } from './JokerAssignmentPicker';
 import { applySortMode, type HandSortMode } from './hand-sort';
 import { detectMeldFitness, findExtendableMelds, sortForMeldPreview } from './meld-detect';
+
+const SUIT_GLYPH: Record<Suit, string> = { hearts: '♥', diamonds: '♦', clubs: '♣', spades: '♠' };
+const SUIT_TEXT_COLOR: Record<Suit, string> = {
+  hearts: '#dc2626',
+  diamonds: '#dc2626',
+  clubs: '#1f2937',
+  spades: '#1f2937',
+};
 
 type GameMode = 'idle' | 'go-down' | 'add-new-meld' | 'add-to-meld' | 'take-all-return';
 
@@ -21,7 +30,7 @@ function sumCards(cards: readonly Card[]): number {
 
 export function GameBoard() {
   const { user } = useAuth();
-  const { room, gameState, hand, roundResult, winner, scores, submitAction, leaveRoom, clearRoundResult, roomError, clearError } =
+  const { room, gameState, hand, myDrawnCard, roundResult, winner, scores, submitAction, leaveRoom, clearRoundResult, roomError, clearError } =
     useGame();
 
   const myId = user?.id ?? '';
@@ -55,6 +64,16 @@ export function GameBoard() {
   const expectedMeldCountAfterSubmit = useRef<number | null>(null);
   // Tracks the hand size we expect after a successful discard (one less).
   const expectedHandSizeAfterDiscard = useRef<number | null>(null);
+  // Tracks the most recent action we sent so we can re-submit with an added
+  // jokerAssignment when the server returns AMBIGUOUS_JOKER_ASSIGNMENT.
+  // This is the only place we keep the original action shape in client state;
+  // it's cleared once the picker is dismissed or accepted.
+  const lastAttemptedAction = useRef<TurnAction | null>(null);
+
+  function send(action: TurnAction): void {
+    lastAttemptedAction.current = action;
+    submitAction(action);
+  }
 
   // Derived hand: only the visual order changes — the underlying `hand` from
   // the server stays authoritative. Selection logic uses card identity so
@@ -163,7 +182,7 @@ export function GameBoard() {
     clearError();
     setSubmitting(true);
     expectedHandSizeAfterDiscard.current = hand.length - selectedCards.length;
-    submitAction({ type: 'add-to-meld', meldId, cards: [...selectedCards] });
+    send({ type: 'add-to-meld', meldId, cards: [...selectedCards] });
   }
 
   const isSelected = (card: Card) => selectedCards.some((c) => cardEquals(c, card));
@@ -184,29 +203,29 @@ export function GameBoard() {
   // ── Actions ──────────────────────────────────────────────────────────────────
 
   function drawFromDeck() {
-    submitAction({ type: 'draw-from-deck' });
+    send({ type: 'draw-from-deck' });
   }
 
   function takeFromDiscard() {
     const count = discardPile.length - 1;
     if (count < 1) return;
-    submitAction({ type: 'take-from-discard', count });
+    send({ type: 'take-from-discard', count });
   }
 
   function keepDrawnCard() {
     if (submitting) return;
     clearError();
-    submitAction({ type: 'keep-drawn-card' });
+    send({ type: 'keep-drawn-card' });
   }
 
   function discardDrawnCardDirect() {
     if (submitting) return;
     clearError();
-    submitAction({ type: 'discard-drawn-card' });
+    send({ type: 'discard-drawn-card' });
   }
 
   function doTakeAll(returnCard: Card) {
-    submitAction({ type: 'take-from-discard', count: discardPile.length, returnCardFromHand: returnCard });
+    send({ type: 'take-from-discard', count: discardPile.length, returnCardFromHand: returnCard });
     setMode('idle');
     setSelectedCards([]);
   }
@@ -217,7 +236,7 @@ export function GameBoard() {
     clearError();
     setSubmitting(true);
     expectedHandSizeAfterDiscard.current = hand.length - 1;
-    submitAction({ type: 'discard', card: selectedCards[0] });
+    send({ type: 'discard', card: selectedCards[0] });
   }
 
   function addToPendingMeld(meldType: MeldType) {
@@ -238,7 +257,7 @@ export function GameBoard() {
     // Existing on-table melds count + the new ones we expect to land.
     const currentMyMeldCount = myState?.melds.length ?? 0;
     expectedMeldCountAfterSubmit.current = currentMyMeldCount + pendingMelds.length;
-    submitAction({ type: 'go-down', melds: pendingMelds });
+    send({ type: 'go-down', melds: pendingMelds });
   }
 
   function submitAddNewMeld(meldType: MeldType) {
@@ -248,7 +267,7 @@ export function GameBoard() {
     setSubmitting(true);
     expectedMeldCountAfterSubmit.current = (myState?.melds.length ?? 0) + 1;
     const sorted = sortForMeldPreview(selectedCards, meldType);
-    submitAction({ type: 'add-new-meld', meld: { type: meldType, cards: sorted } });
+    send({ type: 'add-new-meld', meld: { type: meldType, cards: sorted } });
   }
 
   function submitAddToMeld(meldId: string) {
@@ -258,7 +277,59 @@ export function GameBoard() {
     setSubmitting(true);
     // Add-to-meld doesn't add a new meld but it does shrink the hand.
     expectedHandSizeAfterDiscard.current = hand.length - selectedCards.length;
-    submitAction({ type: 'add-to-meld', meldId, cards: [...selectedCards] });
+    send({ type: 'add-to-meld', meldId, cards: [...selectedCards] });
+  }
+
+  // ── Joker assignment & replacement ────────────────────────────────────────
+
+  /**
+   * Re-submit the last action with the user's chosen joker assignment merged in.
+   * Used after the AMBIGUOUS_JOKER_ASSIGNMENT picker is dismissed with a choice.
+   */
+  function resubmitWithJokerAssignment(choice: JokerAssignment): void {
+    const last = lastAttemptedAction.current;
+    if (!last) return;
+    clearError();
+
+    if (last.type === 'go-down') {
+      const idx = roomError?.meldIndex ?? 0;
+      const newMelds = last.melds.map((m, i) =>
+        i === idx ? { ...m, jokerAssignment: choice } : m,
+      );
+      setSubmitting(true);
+      send({ type: 'go-down', melds: newMelds });
+    } else if (last.type === 'add-new-meld') {
+      setSubmitting(true);
+      send({ type: 'add-new-meld', meld: { ...last.meld, jokerAssignment: choice } });
+    } else if (last.type === 'add-to-meld') {
+      setSubmitting(true);
+      send({ ...last, jokerAssignment: choice });
+    }
+  }
+
+  /**
+   * Trigger the replace-joker flow: a meld on the table contains a joker,
+   * the player has the matching real card selected (exactly 1), and clicking
+   * the meld swaps it. The meld may belong to the player or to an opponent.
+   */
+  function tryReplaceJoker(meldId: string, jokerAssignment: JokerAssignment): boolean {
+    if (submitting) return false;
+    if (!isMyTurn) return false;
+    if (!myState?.hasGoneDown) return false;
+    if (gameState?.didTakeFromDiscardThisTurn) return false;
+    if (selectedCards.length !== 1) return false;
+    const card = selectedCards[0];
+    if (card.isJoker) return false;
+    if (card.rank !== jokerAssignment.representsRank) return false;
+    if (card.suit !== jokerAssignment.representsSuit) return false;
+    clearError();
+    // No optimistic submitting flag: replace-joker doesn't change hand size or
+    // meld count, so neither commit-watch effect would fire. We instead clear
+    // selection eagerly — the server-broadcast game:state and game:hand will
+    // arrive in the next tick or so. If it errors, the error banner shows.
+    setSelectedCards([]);
+    send({ type: 'replace-joker', meldId, replacementCard: card });
+    return true;
   }
 
   if (!gameState) {
@@ -279,8 +350,29 @@ export function GameBoard() {
   // Pending draw decision — between draw-from-deck and the Keep/Discard
   // choice. While in this phase the engine rejects every other action, so
   // the UI hides the rest of the action bar and shows the preview instead.
+  //
+  // PRIVACY: the actual drawn card is delivered via the private
+  // game:drawn-card socket event into context.myDrawnCard — only the
+  // owning player ever receives it. Opponents see only
+  // gameState.pendingDrawnCardPresent (a boolean) and render a redacted
+  // "{name} is deciding…" hint with a card-back.
   const isPendingDecision = isMyTurn && gameState.turnPhase === 'pending-drawn-decision';
-  const pendingDrawnCard = gameState.pendingDrawnCard;
+  const pendingDrawnCard = isPendingDecision ? myDrawnCard : null;
+
+  // True when the local player can attempt to replace the joker in `meld`
+  // right now: it has a joker assignment, the player has gone down, hasn't
+  // taken from the discard pile this turn, and has selected exactly one card
+  // matching the joker's representsRank+suit.
+  function canReplaceJokerNow(jokerAssignment: JokerAssignment | undefined): boolean {
+    if (!jokerAssignment) return false;
+    if (!isMyTurn) return false;
+    if (!myState?.hasGoneDown) return false;
+    if (gameState?.didTakeFromDiscardThisTurn) return false;
+    if (selectedCards.length !== 1) return false;
+    const c = selectedCards[0];
+    if (c.isJoker) return false;
+    return c.rank === jokerAssignment.representsRank && c.suit === jokerAssignment.representsSuit;
+  }
 
   return (
     <div className="game-board">
@@ -360,16 +452,31 @@ export function GameBoard() {
                     isMyTurn &&
                     !!myState?.hasGoneDown &&
                     !gameState?.didTakeFromDiscardThisTurn;
+                  const canReplaceHere = canReplaceJokerNow(meld.jokerAssignment);
+                  const handleClick = canReplaceHere
+                    ? () => tryReplaceJoker(meld.id, meld.jokerAssignment!)
+                    : isQuickTarget
+                      ? () => quickExtendMeld(meld.id)
+                      : undefined;
                   return (
                     <div
                       key={meld.id}
-                      className={`meld-group ${isQuickTarget ? 'target' : ''}`}
-                      onClick={isQuickTarget ? () => quickExtendMeld(meld.id) : undefined}
-                      title={isQuickTarget ? `Click to add ${selectedCards.length} card(s) to this opponent meld` : undefined}
+                      className={`meld-group ${isQuickTarget || canReplaceHere ? 'target' : ''}`}
+                      onClick={handleClick}
+                      title={
+                        canReplaceHere
+                          ? `Click to swap your ${meld.jokerAssignment!.representsRank}${SUIT_GLYPH[meld.jokerAssignment!.representsSuit]} for the joker in this meld`
+                          : isQuickTarget
+                            ? `Click to add ${selectedCards.length} card(s) to this opponent meld`
+                            : undefined
+                      }
                     >
                       {meld.cards.map((c) => (
                         <CardView key={cardId(c)} card={c} size="xs" />
                       ))}
+                      {meld.jokerAssignment && (
+                        <JokerLabel assignment={meld.jokerAssignment} compact />
+                      )}
                     </div>
                   );
                 })}
@@ -449,28 +556,36 @@ export function GameBoard() {
               isMyTurn &&
               !!myState?.hasGoneDown &&
               !gameState?.didTakeFromDiscardThisTurn;
-            const showAsTarget = isExplicitTarget || isQuickTarget;
-            const handleClick = isExplicitTarget
-              ? () => submitAddToMeld(meld.id)
-              : isQuickTarget
-                ? () => quickExtendMeld(meld.id)
-                : undefined;
+            const canReplaceHere = canReplaceJokerNow(meld.jokerAssignment);
+            const showAsTarget = isExplicitTarget || isQuickTarget || canReplaceHere;
+            const handleClick = canReplaceHere
+              ? () => tryReplaceJoker(meld.id, meld.jokerAssignment!)
+              : isExplicitTarget
+                ? () => submitAddToMeld(meld.id)
+                : isQuickTarget
+                  ? () => quickExtendMeld(meld.id)
+                  : undefined;
             return (
               <div
                 key={meld.id}
                 className={`meld-group ${showAsTarget ? 'target' : ''}`}
                 onClick={handleClick}
                 title={
-                  isExplicitTarget
-                    ? 'Click to add cards here'
-                    : isQuickTarget
-                      ? `Click to add ${selectedCards.length} card(s) to this meld`
-                      : undefined
+                  canReplaceHere
+                    ? `Click to swap your ${meld.jokerAssignment!.representsRank}${SUIT_GLYPH[meld.jokerAssignment!.representsSuit]} for the joker in this meld`
+                    : isExplicitTarget
+                      ? 'Click to add cards here'
+                      : isQuickTarget
+                        ? `Click to add ${selectedCards.length} card(s) to this meld`
+                        : undefined
                 }
               >
                 {meld.cards.map((c) => (
                   <CardView key={cardId(c)} card={c} size="sm" />
                 ))}
+                {meld.jokerAssignment && (
+                  <JokerLabel assignment={meld.jokerAssignment} />
+                )}
               </div>
             );
           })}
@@ -733,11 +848,13 @@ export function GameBoard() {
         </div>
       )}
 
-      {/* Pending-decision view for opponents — informational only, no actions. */}
-      {!isPendingDecision && gameState.turnPhase === 'pending-drawn-decision' && pendingDrawnCard && (
+      {/* Pending-decision view for opponents — REDACTED. We render a card-back
+          so the player sees the activity without seeing the card's identity. */}
+      {!isPendingDecision && gameState.turnPhase === 'pending-drawn-decision'
+        && gameState.pendingDrawnCardPresent && (
         <div className="drawn-card-preview drawn-card-preview--watch" role="status">
           <div className="drawn-card-preview-card">
-            <CardView card={pendingDrawnCard} size="sm" />
+            <CardBack size="sm" />
           </div>
           <div className="drawn-card-preview-body">
             <div className="drawn-card-preview-title">
@@ -925,6 +1042,62 @@ export function GameBoard() {
           </div>
         </div>
       )}
+
+      {/* ── Joker assignment picker (ambiguous meld) ── */}
+      {roomError?.code === 'AMBIGUOUS_JOKER_ASSIGNMENT' && roomError.candidates && roomError.candidates.length > 0 && (
+        <JokerAssignmentPicker
+          candidates={roomError.candidates}
+          onChoose={(choice) => resubmitWithJokerAssignment(choice)}
+          onCancel={() => {
+            // Cancelling clears the error AND wipes the pending action so a
+            // stale lastAttemptedAction can't be silently reused on the next
+            // unrelated submission. The player keeps their selection so they
+            // can adjust the meld and try again.
+            clearError();
+            lastAttemptedAction.current = null;
+            setSubmitting(false);
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+/**
+ * Inline label used inside meld groups to show what real card a joker
+ * currently represents. Stays small so it tucks under the joker card
+ * without pushing other cards around.
+ */
+function JokerLabel({
+  assignment,
+  compact = false,
+}: {
+  assignment: JokerAssignment;
+  compact?: boolean;
+}) {
+  return (
+    <span
+      title={`Joker is currently standing in for ${assignment.representsRank} of ${assignment.representsSuit}`}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 2,
+        padding: compact ? '0 4px' : '1px 6px',
+        marginLeft: 2,
+        background: 'rgba(217, 70, 239, 0.18)',
+        color: '#f5d0fe',
+        border: '1px solid rgba(217, 70, 239, 0.45)',
+        borderRadius: 4,
+        fontSize: compact ? '0.62rem' : '0.7rem',
+        fontWeight: 600,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      <span aria-hidden="true">🃏→</span>
+      <span>{assignment.representsRank}</span>
+      <span style={{ color: SUIT_TEXT_COLOR[assignment.representsSuit], background: 'rgba(255,255,255,0.85)', padding: '0 2px', borderRadius: 2 }}>
+        {SUIT_GLYPH[assignment.representsSuit]}
+      </span>
+    </span>
   );
 }

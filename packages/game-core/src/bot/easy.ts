@@ -30,7 +30,8 @@ import {
   ACE_HIGH,
 } from '@calash/shared';
 
-import { validateMeld, totalCardValue, cardValue } from '../meld.js';
+import { validateMeld, totalCardValue, cardValue, computeJokerCandidates } from '../meld.js';
+import type { JokerAssignment } from '@calash/shared';
 import { goDownMinimum } from '../rules/going-down.js';
 
 // Re-export for callers
@@ -103,7 +104,7 @@ export function chooseEasyAction(ctx: BotContext, opts: ChooseEasyOptions = {}):
 
     const newMeld = findNewMeldFromHand(hand, opts);
     if (newMeld) {
-      return { type: 'add-new-meld', meld: { type: newMeld.type, cards: newMeld.cards } };
+      return { type: 'add-new-meld', meld: attachJokerAssignmentIfNeeded(newMeld.type, newMeld.cards) };
     }
   }
 
@@ -214,7 +215,7 @@ function tryComposeGoDown(
 
   return {
     type: 'go-down',
-    melds: chosen.map((c) => ({ type: c.type, cards: c.cards })),
+    melds: chosen.map((c) => attachJokerAssignmentIfNeeded(c.type, c.cards)),
   };
 }
 
@@ -244,9 +245,21 @@ function findExtension(
   for (const { meld } of tableMelds) {
     for (const card of hand) {
       const trial = [...meld.cards, card];
-      if (validateMeld(meld.type, trial).valid) {
-        return { type: 'add-to-meld', meldId: meld.id, cards: [card] };
+      if (!validateMeld(meld.type, trial).valid) continue;
+
+      // If we're adding a joker to a meld that has no joker yet, the engine
+      // requires a jokerAssignment. Skip the bot move if it can't be resolved
+      // unambiguously — we don't want to flip a coin server-side and risk
+      // tripping the circuit breaker on a malformed payload. The bot will
+      // try a different card next.
+      if (card.isJoker && !meld.jokerAssignment) {
+        const candidates = computeJokerCandidates(meld.type, trial);
+        if (candidates.length === 0) continue;
+        const pick = candidates[0]; // deterministic — first legal candidate
+        return { type: 'add-to-meld', meldId: meld.id, cards: [card], jokerAssignment: pick };
       }
+
+      return { type: 'add-to-meld', meldId: meld.id, cards: [card] };
     }
   }
   return null;
@@ -405,6 +418,25 @@ function forEachCombination<T>(items: T[], k: number, cb: (combo: T[]) => void):
 function cardKey(c: Card): string {
   if (c.isJoker) return `J${c.jokerIndex}`;
   return `${c.rank}-${c.suit}-${c.deckIndex}`;
+}
+
+/**
+ * If a candidate meld contains a joker, attach a jokerAssignment so the
+ * engine never needs to ask the bot to disambiguate. The bot picks the
+ * first legal candidate deterministically — both choices score the same
+ * (joker = 25 either way) so there's no strategic loss.
+ *
+ * Returns the meld unchanged when no joker is present.
+ */
+function attachJokerAssignmentIfNeeded(
+  type: MeldType,
+  cards: readonly Card[],
+): { type: MeldType; cards: readonly Card[]; jokerAssignment?: JokerAssignment } {
+  const hasJoker = cards.some((c) => c.isJoker);
+  if (!hasJoker) return { type, cards };
+  const candidates = computeJokerCandidates(type, cards);
+  if (candidates.length === 0) return { type, cards }; // should not happen — meld would be invalid
+  return { type, cards, jokerAssignment: candidates[0] };
 }
 
 // Suppress unused warnings (referenced for future medium-bot expansion)

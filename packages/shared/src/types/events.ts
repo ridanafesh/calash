@@ -54,12 +54,36 @@ export interface ClientToServerEvents {
 /** Events the server broadcasts to clients. */
 export interface ServerToClientEvents {
   'room:updated': (room: GameRoom) => void;
-  'room:error': (error: { code: string; message: string }) => void;
+  /**
+   * General-purpose error broadcast.
+   *
+   * `candidates` and `meldIndex` are populated only for the
+   * `AMBIGUOUS_JOKER_ASSIGNMENT` code, telling the UI which meld in the
+   * pending action needs disambiguation and what choices to offer.
+   */
+  'room:error': (error: {
+    code: string;
+    message: string;
+    candidates?: import('./game.js').JokerAssignment[];
+    meldIndex?: number;
+  }) => void;
 
   /** Sent to each player privately with their current hand. */
   'game:hand': (hand: import('./game.js').Card[]) => void;
 
-  /** Public round state (no hidden deck, no other players' hands). */
+  /**
+   * PRIVATE — sent only to the player who just drew from the hidden deck,
+   * carrying the actual drawn card so they can decide Keep or Discard.
+   * `null` means the pending state has cleared (decision made or turn
+   * advanced) so the client can hide the preview.
+   *
+   * Opponents NEVER see this event. They only see a public hint via
+   * RoundStateView.pendingDrawnCardPresent.
+   */
+  'game:drawn-card': (card: import('./game.js').Card | null) => void;
+
+  /** Public round state (no hidden deck, no other players' hands, no
+   *  drawn-card identity). */
   'game:state': (state: RoundStateView) => void;
 
   'game:round-result': (result: RoundResult) => void;

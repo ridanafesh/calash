@@ -114,8 +114,15 @@ export interface RoundStateView {
   highestTableTotal: number;
   endReason?: RoundEndReason;
   finisherPlayerId?: string;
-  /** Mirror of RoundState.pendingDrawnCard — visible to all clients. */
-  pendingDrawnCard?: Card;
+  /**
+   * True iff the current player has drawn from the deck and not yet
+   * resolved the Keep/Discard decision. Lets opponents render a
+   * "{name} is deciding…" hint without leaking the card's identity.
+   *
+   * The actual drawn card is private and is delivered to the owner via
+   * the dedicated `game:drawn-card` event — never via this broadcast view.
+   */
+  pendingDrawnCardPresent?: boolean;
 }
 
 // ─── Round result (for scoring) ──────────────────────────────────────────────

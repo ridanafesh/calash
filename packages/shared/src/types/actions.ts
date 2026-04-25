@@ -1,4 +1,4 @@
-import type { Card, MeldType } from './game.js';
+import type { Card, MeldType, JokerAssignment } from './game.js';
 
 /**
  * Discriminated union of every action a player can submit during their turn.
@@ -61,10 +61,18 @@ export interface TakeFromDiscardAction {
  */
 export interface GoDownAction {
   readonly type: 'go-down';
-  /** The melds to place on the table.  IDs are assigned server-side. */
+  /**
+   * The melds to place on the table.  IDs are assigned server-side.
+   *
+   * `jokerAssignment` is required only when the meld contains a joker AND
+   * the joker's role is ambiguous (multiple legal rank/suit positions). When
+   * the role is unambiguous the engine resolves it automatically; supplying
+   * an assignment that disagrees with the unambiguous resolution is rejected.
+   */
   readonly melds: ReadonlyArray<{
     readonly type: MeldType;
     readonly cards: readonly Card[];
+    readonly jokerAssignment?: JokerAssignment;
   }>;
 }
 
@@ -80,6 +88,13 @@ export interface AddToMeldAction {
   readonly meldId: string;
   /** One or more cards from the player's hand to append. */
   readonly cards: readonly Card[];
+  /**
+   * Required only if the player is adding a JOKER to a meld AND the joker's
+   * role in the resulting meld is ambiguous. Adding real cards to a meld
+   * never affects an existing joker assignment, and adding a joker to a
+   * meld that already contains a joker is rejected (max 1 joker per meld).
+   */
+  readonly jokerAssignment?: JokerAssignment;
 }
 
 /**
@@ -91,7 +106,35 @@ export interface AddNewMeldAction {
   readonly meld: {
     readonly type: MeldType;
     readonly cards: readonly Card[];
+    /** Required only when the joker's role in the meld is ambiguous. */
+    readonly jokerAssignment?: JokerAssignment;
   };
+}
+
+/**
+ * Replace a joker that's currently in a table meld with the real card it
+ * stands for, returning the joker to the player's hand.
+ *
+ * Valid only when turnPhase === 'holding' AND hasGoneDown === true.
+ *
+ * Rules enforced by game-core:
+ *   - The target meld must currently contain a joker (i.e. carry a
+ *     jokerAssignment).
+ *   - For SEQUENCES: replacementCard must exactly match the joker's
+ *     representsRank + representsSuit.
+ *   - For SETS: the natural 4-of-a-kind reclaim rule applies — the joker can
+ *     only be reclaimed when the meld already contains all 3 OTHER real
+ *     suits of the set rank, AND replacementCard is the 4th missing suit
+ *     (which equals the joker's representsSuit). Adding a single real suit
+ *     to a 3-card joker set is NOT enough; the player must add the 3rd real
+ *     suit first via add-to-meld, then reclaim.
+ *   - replacementCard must be in the player's hand.
+ *   - Cannot be used on the same turn the player took from the discard pile.
+ */
+export interface ReplaceJokerAction {
+  readonly type: 'replace-joker';
+  readonly meldId: string;
+  readonly replacementCard: Card;
 }
 
 /**
@@ -140,6 +183,7 @@ export type TurnAction =
   | GoDownAction
   | AddToMeldAction
   | AddNewMeldAction
+  | ReplaceJokerAction
   | DiscardAction
   | KeepDrawnCardAction
   | DiscardDrawnCardAction;

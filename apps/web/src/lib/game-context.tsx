@@ -13,6 +13,7 @@ import type { Socket } from 'socket.io-client';
 import type {
   BotDifficulty,
   GameRoom,
+  JokerAssignment,
   RoomCreateOptions,
   RoundStateView,
   RoundResult,
@@ -26,12 +27,33 @@ import { useAuth } from './auth-context';
 
 type CalashSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
+/**
+ * Wider error shape than just `{code, message}` — `candidates` and `meldIndex`
+ * are populated only for the `AMBIGUOUS_JOKER_ASSIGNMENT` code so the UI can
+ * open a picker dialog instead of just showing a banner.
+ */
+export interface RoomError {
+  code: string;
+  message: string;
+  candidates?: JokerAssignment[];
+  meldIndex?: number;
+}
+
 interface GameContextValue {
   connected: boolean;
   room: GameRoom | null;
-  roomError: { code: string; message: string } | null;
+  roomError: RoomError | null;
   gameState: RoundStateView | null;
   hand: Card[];
+  /**
+   * The card the LOCAL player just drew from the deck and hasn't yet
+   * decided to keep or discard. Null when the local player has no
+   * pending decision. Other players' / bots' drawn cards are NEVER
+   * delivered to this client — opponents only see
+   * gameState.pendingDrawnCardPresent (a boolean) so the UI can
+   * render "X is deciding…" without leaking the card identity.
+   */
+  myDrawnCard: Card | null;
   scores: GameScore[];
   roundResult: RoundResult | null;
   winner: { playerId: string; finalScore: number } | null;
@@ -54,9 +76,10 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const socketRef = useRef<CalashSocket | null>(null);
   const [connected, setConnected] = useState(false);
   const [room, setRoom] = useState<GameRoom | null>(null);
-  const [roomError, setRoomError] = useState<{ code: string; message: string } | null>(null);
+  const [roomError, setRoomError] = useState<RoomError | null>(null);
   const [gameState, setGameState] = useState<RoundStateView | null>(null);
   const [hand, setHand] = useState<Card[]>([]);
+  const [myDrawnCard, setMyDrawnCard] = useState<Card | null>(null);
   const [scores, setScores] = useState<GameScore[]>([]);
   const [roundResult, setRoundResult] = useState<RoundResult | null>(null);
   const [winner, setWinner] = useState<{ playerId: string; finalScore: number } | null>(null);
@@ -95,6 +118,11 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     s.on('room:error', setRoomError);
     s.on('game:state', setGameState);
     s.on('game:hand', setHand);
+    // PRIVATE — only the drawing player receives this event with the actual
+    // card. null clears the local preview when the decision is resolved or
+    // the turn advances. Receiving this event for someone else is impossible
+    // (the server only emits to the owning player's socket).
+    s.on('game:drawn-card', setMyDrawnCard);
     s.on('game:scores', setScores);
     s.on('game:round-result', setRoundResult);
     s.on('game:finished', setWinner);
@@ -123,6 +151,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     setRoom(null);
     setGameState(null);
     setHand([]);
+    setMyDrawnCard(null);
     setScores([]);
     setRoundResult(null);
     setWinner(null);
@@ -152,6 +181,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         roomError,
         gameState,
         hand,
+        myDrawnCard,
         scores,
         roundResult,
         winner,

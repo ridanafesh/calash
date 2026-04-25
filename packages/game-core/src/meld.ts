@@ -1,4 +1,12 @@
-import type { Card, MeldType, RegularCard } from '@calash/shared';
+import type {
+  Card,
+  JokerAssignment,
+  JokerCard,
+  MeldType,
+  Rank,
+  RegularCard,
+  Suit,
+} from '@calash/shared';
 import { RANK_ORDER, ACE_LOW, ACE_HIGH, MELD_CONFIG, CARD_VALUES } from '@calash/shared';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -224,4 +232,218 @@ export function totalCardValue(cards: readonly Card[]): number {
 /** Total point value of a collection of melds. */
 export function totalMeldValue(melds: ReadonlyArray<{ cards: readonly Card[] }>): number {
   return melds.reduce((sum, m) => sum + totalCardValue(m.cards), 0);
+}
+
+// ─── Joker assignment ────────────────────────────────────────────────────────
+
+/**
+ * Inverse of RANK_ORDER for sequences: ordered list of (rankValue, rank) so we
+ * can map a rank position back to its rank label.  For sequences, the "Ace as
+ * 1" position maps to rank 'A'; the "Ace as 14" position also maps to 'A'.
+ */
+const RANK_BY_VALUE: ReadonlyMap<number, Rank> = (() => {
+  const m = new Map<number, Rank>();
+  for (const [rank, value] of Object.entries(RANK_ORDER)) {
+    if (m.has(value)) continue;
+    m.set(value, rank as Rank);
+  }
+  // Ensure both Ace positions map back to 'A'.
+  m.set(ACE_LOW, 'A');
+  m.set(ACE_HIGH, 'A');
+  return m;
+})();
+
+const ALL_SUITS: readonly Suit[] = ['hearts', 'diamonds', 'clubs', 'spades'];
+
+/**
+ * Compute every legal rank+suit a joker could represent in the given meld.
+ *
+ * For SEQUENCES with one joker:
+ *   - The non-joker cards already fix the suit (they must all be the same).
+ *   - For each Ace assignment that yields a valid run, the joker fills either
+ *     an interior gap (uniquely determined) or extends one of the two edges
+ *     (creating up to 2 candidates per assignment). We return the union of
+ *     all such candidates across assignments, deduplicated by rank.
+ *
+ * For SETS with one joker:
+ *   - The rank is fixed (all non-jokers share it).
+ *   - The joker can stand for any suit not already present; usually 1 suit
+ *     candidate (3-card set), occasionally more if the set is structurally
+ *     incomplete.
+ *
+ * Returns an empty array when:
+ *   - the meld contains no joker, or
+ *   - the meld is structurally invalid (no legal assignment exists).
+ *
+ * The caller (validateMeld) handles the empty case as "invalid"; the engine
+ * uses this to auto-resolve unambiguous melds and to drive UI ambiguity prompts.
+ */
+export function computeJokerCandidates(
+  type: MeldType,
+  cards: readonly Card[],
+): JokerAssignment[] {
+  const joker = cards.find((c): c is JokerCard => c.isJoker);
+  if (!joker) return [];
+
+  const regulars = cards.filter((c): c is RegularCard => !c.isJoker);
+
+  if (type === 'sequence') {
+    // All non-joker cards must share a suit; bail out if not (validator
+    // will reject this meld anyway).
+    const suits = new Set(regulars.map((c) => c.suit));
+    if (suits.size > 1) return [];
+    if (regulars.length === 0) return []; // joker-only — caller rejects on length
+
+    const suit: Suit = regulars[0].suit;
+    const aces = regulars.filter((c) => c.rank === 'A');
+    const others = regulars.filter((c) => c.rank !== 'A');
+    const otherRanks = others.map((c) => RANK_ORDER[c.rank] ?? 0);
+
+    let aceAssignments: number[][];
+    if (aces.length === 0) aceAssignments = [[]];
+    else if (aces.length === 1) aceAssignments = [[ACE_LOW], [ACE_HIGH]];
+    else if (aces.length === 2) aceAssignments = [[ACE_LOW, ACE_HIGH]];
+    else return [];
+
+    const positions = new Set<number>();
+    for (const aceValues of aceAssignments) {
+      const known = [...otherRanks, ...aceValues].sort((a, b) => a - b);
+      // Find the joker position(s) that would complete the run.
+      addJokerPositions(known, positions);
+    }
+
+    return [...positions]
+      .map((rankValue) => {
+        const rank = RANK_BY_VALUE.get(rankValue);
+        if (!rank) return null;
+        return { jokerIndex: joker.jokerIndex, representsRank: rank, representsSuit: suit };
+      })
+      .filter((a): a is JokerAssignment => a !== null);
+  }
+
+  // SET: rank is fixed; joker must take any missing suit.
+  const ranks = new Set(regulars.map((c) => c.rank));
+  if (ranks.size > 1) return [];
+  if (regulars.length === 0) return [];
+
+  const rank = regulars[0].rank;
+  const usedSuits = new Set(regulars.map((c) => c.suit));
+  const candidates: JokerAssignment[] = [];
+  for (const s of ALL_SUITS) {
+    if (!usedSuits.has(s)) {
+      candidates.push({ jokerIndex: joker.jokerIndex, representsRank: rank, representsSuit: s });
+    }
+  }
+  return candidates;
+}
+
+/**
+ * Given the sorted list of known rank values in a same-suit sequence and a
+ * single joker to place, add every legal rank position the joker could fill
+ * into the `out` set.  Duplicates and out-of-range positions are skipped.
+ *
+ *   [10, Q]    → joker may be 11 (J) — the only position that fills the gap
+ *   [10, J]    → joker may be 9 OR Q — two edge candidates
+ *   [Q, K]     → joker may be J OR A (high) if length allows
+ *   [J, Q, K]  → joker may be 10 OR A (high)
+ */
+function addJokerPositions(sortedKnown: number[], out: Set<number>): void {
+  if (sortedKnown.length === 0) return;
+  for (let i = 1; i < sortedKnown.length; i++) {
+    if (sortedKnown[i] === sortedKnown[i - 1]) return; // duplicate ranks invalid
+  }
+
+  const min = sortedKnown[0];
+  const max = sortedKnown[sortedKnown.length - 1];
+
+  // Count interior gaps (slots strictly between known positions).
+  let gaps = 0;
+  let gapPos = -1;
+  for (let i = 1; i < sortedKnown.length; i++) {
+    const diff = sortedKnown[i] - sortedKnown[i - 1] - 1;
+    gaps += diff;
+    if (diff === 1) gapPos = sortedKnown[i] - 1;
+    else if (diff > 1) gaps = 99; // > 1 joker required → invalid
+  }
+
+  if (gaps === 1 && gapPos !== -1) {
+    out.add(gapPos);
+    return;
+  }
+  if (gaps !== 0) return; // invalid for a single joker
+
+  // No interior gap — joker extends an edge. Total length is known.length + 1
+  // and must be ≥ MIN_SEQUENCE_LENGTH (already implied if the run is being
+  // proposed). Edge positions are min-1 and max+1, each within [ACE_LOW, ACE_HIGH].
+  if (min - 1 >= ACE_LOW) out.add(min - 1);
+  if (max + 1 <= ACE_HIGH) out.add(max + 1);
+}
+
+/**
+ * Resolve the joker assignment for a meld at construction time.
+ *
+ * Returns:
+ *   - { ok: true, assignment: undefined }  — meld has no joker; nothing to pin
+ *   - { ok: true, assignment: ... }        — exactly one candidate, or the
+ *                                            client provided an explicit choice
+ *                                            that matches a candidate
+ *   - { ok: false, ambiguous: true,
+ *        candidates: [...] }               — multiple candidates and no choice
+ *                                            supplied (UI must prompt)
+ *   - { ok: false, ambiguous: false,
+ *        reason: '...' }                   — invalid choice or no candidates
+ */
+export type ResolveJokerResult =
+  | { ok: true; assignment: JokerAssignment | undefined }
+  | { ok: false; ambiguous: true; candidates: JokerAssignment[] }
+  | { ok: false; ambiguous: false; reason: string };
+
+export function resolveJokerAssignment(
+  type: MeldType,
+  cards: readonly Card[],
+  provided: JokerAssignment | undefined,
+): ResolveJokerResult {
+  const hasJoker = cards.some((c) => c.isJoker);
+  if (!hasJoker) {
+    if (provided) {
+      return {
+        ok: false,
+        ambiguous: false,
+        reason: 'Joker assignment supplied for a meld containing no joker',
+      };
+    }
+    return { ok: true, assignment: undefined };
+  }
+
+  const candidates = computeJokerCandidates(type, cards);
+  if (candidates.length === 0) {
+    return {
+      ok: false,
+      ambiguous: false,
+      reason: 'Joker has no legal position in this meld',
+    };
+  }
+
+  if (provided) {
+    const match = candidates.find(
+      (c) =>
+        c.jokerIndex === provided.jokerIndex &&
+        c.representsRank === provided.representsRank &&
+        c.representsSuit === provided.representsSuit,
+    );
+    if (!match) {
+      return {
+        ok: false,
+        ambiguous: false,
+        reason: `Joker assignment ${provided.representsRank} of ${provided.representsSuit} is not legal for this meld`,
+      };
+    }
+    return { ok: true, assignment: match };
+  }
+
+  if (candidates.length === 1) {
+    return { ok: true, assignment: candidates[0] };
+  }
+
+  return { ok: false, ambiguous: true, candidates };
 }

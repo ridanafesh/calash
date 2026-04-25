@@ -94,6 +94,9 @@ export function validateTurnAction(action: TurnAction, ctx: TurnContext): Valida
     case 'add-new-meld':
       return validateAddNewMeld(action.meld.type, action.meld.cards, ctx);
 
+    case 'replace-joker':
+      return validateReplaceJoker(action.meldId, action.replacementCard, ctx);
+
     case 'discard':
       return validateDiscard(action.card, ctx);
   }
@@ -185,6 +188,38 @@ function validateAddNewMeld(
   }
 
   return validateMeld(type, cards);
+}
+
+function validateReplaceJoker(
+  meldId: string,
+  replacementCard: Card,
+  ctx: TurnContext,
+): ValidationResult {
+  if (ctx.turnPhase !== 'holding') {
+    return { valid: false, reason: `Cannot replace a joker during phase '${ctx.turnPhase}'` };
+  }
+  if (!ctx.hasGoneDown) {
+    return { valid: false, reason: 'You must go down before replacing jokers in melds' };
+  }
+  if (ctx.didTakeFromDiscardThisTurn) {
+    return {
+      valid: false,
+      reason: 'Cannot replace a joker on the same turn you took from the discard pile',
+    };
+  }
+  if (replacementCard.isJoker) {
+    return { valid: false, reason: 'Replacement card cannot itself be a joker' };
+  }
+  if (!ctx.tableMelds[meldId]) {
+    return { valid: false, reason: `Meld '${meldId}' not found on the table` };
+  }
+  const inHand = ctx.playerHand.some((c) => isSameCard(c, replacementCard));
+  if (!inHand) {
+    return { valid: false, reason: 'Replacement card is not in your hand' };
+  }
+  // The exact rank/suit check and the set-reclaim 4-suit rule live in the
+  // engine handler, where the meld's jokerAssignment is available.
+  return { valid: true };
 }
 
 function validateDiscard(card: Card, ctx: TurnContext): ValidationResult {

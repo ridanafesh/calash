@@ -87,7 +87,12 @@ describe('draw-from-deck — pending decision flow', () => {
     expect(r.state.currentTurnPlayerId).toBe(fix.me); // still my turn
   });
 
-  it('exposes pendingDrawnCard in the broadcast view (opponents can see "X drew")', () => {
+  it('REDACTS the drawn card identity in the broadcast view — only signals presence', () => {
+    // PRIVACY: opponents must not see what the active player drew. The
+    // public broadcast view exposes a boolean `pendingDrawnCardPresent` so
+    // the UI can render "X is deciding…" but the card identity stays in
+    // the server-side RoundState only and is delivered to the owner via
+    // the dedicated game:drawn-card socket event.
     const drawn = rc('K', 'spades');
     const fix = makeFixture({ myHand: [rc('5', 'clubs')], topOfDeck: drawn });
     const r = applyTurnAction(fix.state, fix.me, { type: 'draw-from-deck' });
@@ -95,8 +100,27 @@ describe('draw-from-deck — pending decision flow', () => {
     if (!r.ok) return;
 
     const view = toRoundStateView(r.state);
-    expect(view.pendingDrawnCard).toEqual(drawn);
+    // The view does NOT carry the card itself.
+    expect(view).not.toHaveProperty('pendingDrawnCard');
+    expect(view.pendingDrawnCardPresent).toBe(true);
     expect(view.turnPhase).toBe('pending-drawn-decision');
+
+    // The server-side state still has the card (so the engine can apply
+    // keep/discard against it).
+    expect(r.state.pendingDrawnCard).toEqual(drawn);
+  });
+
+  it('clears pendingDrawnCardPresent after Keep / Discard', () => {
+    const drawn = rc('K', 'spades');
+    const fix = makeFixture({ myHand: [rc('5', 'clubs')], topOfDeck: drawn });
+    const drew = applyTurnAction(fix.state, fix.me, { type: 'draw-from-deck' });
+    if (!drew.ok) return;
+    const kept = applyTurnAction(drew.state, fix.me, { type: 'keep-drawn-card' });
+    expect(kept.ok).toBe(true);
+    if (!kept.ok) return;
+    const view = toRoundStateView(kept.state);
+    expect(view.pendingDrawnCardPresent).toBe(false);
+    expect(view).not.toHaveProperty('pendingDrawnCard');
   });
 });
 

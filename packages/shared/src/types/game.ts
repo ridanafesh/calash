@@ -59,12 +59,41 @@ export type Card = RegularCard | JokerCard;
  */
 export type MeldType = 'sequence' | 'set';
 
+/**
+ * Pins which real card a joker stands in for inside a specific meld.
+ *
+ * Stored on Meld so that:
+ *   - sequence joker replacement can be validated against the exact rank+suit
+ *     the joker represents (player must hold THAT card to swap it back),
+ *   - set joker reclaim can confirm the missing suit it filled is now present
+ *     (and that the natural 4-of-a-kind is complete before the swap),
+ *   - the UI can render `Joker → J♥` or `Joker → 9♠` so other players
+ *     understand what role the joker is currently playing.
+ *
+ * For sets, `representsRank` always equals the meld's set rank (kept
+ * explicit for symmetry with sequences and to avoid ambiguity).
+ */
+export interface JokerAssignment {
+  /** Which physical joker (matches JokerCard.jokerIndex). */
+  readonly jokerIndex: 0 | 1;
+  /** The rank the joker currently represents in this meld. */
+  readonly representsRank: Rank;
+  /** The suit the joker currently represents in this meld. */
+  readonly representsSuit: Suit;
+}
+
 export interface Meld {
   readonly id: string;
   readonly type: MeldType;
   readonly cards: readonly Card[];
   /** Cached sum of card values.  Recomputed whenever the meld changes. */
   readonly totalValue: number;
+  /**
+   * Present iff the meld currently contains a joker. Records what real card
+   * the joker is standing in for so the engine can validate replacements
+   * (sequence) and reclaim conditions (set), and so the UI can label it.
+   */
+  readonly jokerAssignment?: JokerAssignment;
 }
 
 // ─── Game / Round lifecycle enumerations ────────────────────────────────────
