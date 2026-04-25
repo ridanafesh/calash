@@ -191,6 +191,17 @@ async function applyPlayerAction(
 const BOT_THINKING_MS = 1200;
 const botTimers = new Map<string, NodeJS.Timeout>();
 
+/**
+ * Per-room consecutive-failure counter for bot actions. If the same bot
+ * fails to make ANY forward progress this many times in a row (validator
+ * rejection, DB persistence failure, etc.) the driver gives up and stops
+ * rescheduling. Without this, a single broken state — like a missing DB
+ * enum value — would have the bot loop forever every 1.2s, hanging the
+ * room and flooding logs.
+ */
+const BOT_MAX_CONSECUTIVE_FAILURES = 3;
+const botFailureCounts = new Map<string, number>();
+
 export function scheduleBotIfNeeded(roomId: string, io: CalashServer): void {
   const room = roomStore.get(roomId);
   if (!room?.round) return;
@@ -200,10 +211,29 @@ export function scheduleBotIfNeeded(roomId: string, io: CalashServer): void {
   const slot = room.players.find((p) => p.userId === currentTurnPlayerId);
   if (!slot?.isBot) return;
 
+  // Circuit breaker — if the bot keeps failing on this room, stop rescheduling.
+  // The room stays alive (humans can still leave / start a new game) but no
+  // more bot timers fire until the counter is reset by a successful action.
+  const failures = botFailureCounts.get(roomId) ?? 0;
+  if (failures >= BOT_MAX_CONSECUTIVE_FAILURES) {
+    console.error(
+      `[bot] Circuit breaker tripped for room ${roomId} (${failures} consecutive failures). ` +
+        `Bot driver stopped. Notify the room.`,
+    );
+    io.to(roomId).emit('room:error', {
+      code: 'BOT_HUNG',
+      message:
+        'The bot ran into repeated server errors and stopped. Leave the room and start a new game to recover.',
+    });
+    return;
+  }
+
   const timer = setTimeout(() => {
     botTimers.delete(roomId);
     void runBotAction(roomId, io).catch((err) => {
       console.error(`[bot] Failed to run bot action in room ${roomId}:`, err);
+      // Treat unexpected throws as a failure for circuit-breaker purposes.
+      botFailureCounts.set(roomId, (botFailureCounts.get(roomId) ?? 0) + 1);
     });
   }, BOT_THINKING_MS);
   botTimers.set(roomId, timer);
@@ -215,30 +245,61 @@ async function runBotAction(roomId: string, io: CalashServer): Promise<void> {
 
   const playerId = room.round.state.currentTurnPlayerId;
   const slot = room.players.find((p) => p.userId === playerId);
-  if (!slot?.isBot) return; // Turn moved to a human while the timer was pending.
+  if (!slot?.isBot) {
+    // Turn moved to a human while the timer was pending. Reset the failure
+    // counter — whatever was wrong has resolved itself.
+    botFailureCounts.delete(roomId);
+    return;
+  }
 
   const difficulty = slot.botDifficulty ?? 'easy';
+  const phase = room.round.state.turnPhase;
+
+  // Pick a fail-safe fallback action specific to the current phase. Used both
+  // when decideBotAction throws and when the chosen action is rejected.
+  function fallbackAction(): TurnAction {
+    if (phase === 'pending-drawn-decision') return { type: 'discard-drawn-card' };
+    if (phase === 'awaiting-draw-or-take') return { type: 'draw-from-deck' };
+    // 'holding' — shed the highest-value card to end the turn.
+    const ps = room?.round?.state.playerStates[playerId];
+    if (ps && ps.hand.length > 0) return { type: 'discard', card: ps.hand[0] };
+    return { type: 'draw-from-deck' };
+  }
+
   let action: TurnAction;
   try {
     action = decideBotAction(difficulty, room.round.state, playerId);
   } catch (err) {
-    console.error(`[bot] decideBotAction threw for ${playerId} in ${roomId}:`, err);
-    // Fail safe: have the bot draw from the deck so the game doesn't lock up.
-    action = { type: 'draw-from-deck' };
+    console.error(`[bot] decideBotAction threw for ${playerId} in ${roomId} (phase=${phase}):`, err);
+    action = fallbackAction();
   }
 
   const result = await applyPlayerAction(room, playerId, action, io);
   if (!result.ok) {
-    console.error(`[bot] Bot ${playerId} produced invalid action ${action.type}: ${result.error}`);
-    // Fail safe: discard the highest-value card to end the turn.
-    const ps = room.round?.state.playerStates[playerId];
-    if (ps && ps.hand.length > 0 && room.round?.state.turnPhase === 'holding') {
-      await applyPlayerAction(room, playerId, { type: 'discard', card: ps.hand[0] }, io);
+    console.error(
+      `[bot] Bot ${playerId} action ${action.type} rejected (phase=${phase}): ${result.error}`,
+    );
+    // Try the phase-specific fallback. If that ALSO fails, we count both
+    // failures — the circuit breaker will stop us before the room hangs.
+    const fb = fallbackAction();
+    if (fb.type !== action.type) {
+      const fbResult = await applyPlayerAction(room, playerId, fb, io);
+      if (!fbResult.ok) {
+        console.error(`[bot] Fallback ${fb.type} also rejected: ${fbResult.error}`);
+        botFailureCounts.set(roomId, (botFailureCounts.get(roomId) ?? 0) + 1);
+        scheduleBotIfNeeded(roomId, io); // breaker will check next time
+        return;
+      }
+      // Fallback succeeded — partial recovery. Don't count as failure.
+    } else {
+      botFailureCounts.set(roomId, (botFailureCounts.get(roomId) ?? 0) + 1);
     }
+  } else {
+    // Successful action — reset the failure counter.
+    botFailureCounts.delete(roomId);
   }
 
-  // If the round ended, handleRoundEnd reset the round to lobby and scheduled
-  // the next round; nothing to schedule from here.
+  // If the round ended, handleRoundEnd already scheduled the next round.
   if (result.ok && result.roundEnded) return;
 
   // Re-schedule if it's still a bot's turn (same bot or another bot in seat).
@@ -255,6 +316,7 @@ export function cancelBotTimer(roomId: string): void {
     clearTimeout(t);
     botTimers.delete(roomId);
   }
+  botFailureCounts.delete(roomId);
 }
 
 // ─── Persist melds to DB ──────────────────────────────────────────────────────
