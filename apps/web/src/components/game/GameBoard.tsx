@@ -9,6 +9,7 @@ import type { Card, MeldType } from '@calash/shared';
 import { CardView, CardBack, cardId, cardEquals } from './CardView';
 import { DiscardInspector } from './DiscardInspector';
 import { HandToolbar } from './HandToolbar';
+import { ScoresPanel } from './ScoresPanel';
 import { applySortMode, type HandSortMode } from './hand-sort';
 import { detectMeldFitness, findExtendableMelds, sortForMeldPreview } from './meld-detect';
 
@@ -47,6 +48,7 @@ export function GameBoard() {
   const [handSortMode, setHandSortMode] = useState<HandSortMode>('original');
   const [submitting, setSubmitting] = useState(false);
   const [discardInspectorOpen, setDiscardInspectorOpen] = useState(false);
+  const [scoresOpen, setScoresOpen] = useState(false);
   // Tracks the meld-count we expect after a successful submit. When the
   // server-broadcast state shows our melds list has reached this count, we
   // know the action committed and can clear the panel.
@@ -99,6 +101,17 @@ export function GameBoard() {
       expectedHandSizeAfterDiscard.current = null;
     }
   }, [submitting, roomError]);
+
+  // Auto-dismiss the round-result modal when the next round's state arrives
+  // (gameState.roundNumber moves past the result's roundNumber). The user
+  // may still see the modal for the 5s grace period, but it goes away
+  // automatically the moment a fresh round starts so they're not staring at
+  // last round's scores while round 2 is already live.
+  useEffect(() => {
+    if (roundResult && gameState && gameState.roundNumber > roundResult.roundNumber) {
+      clearRoundResult();
+    }
+  }, [roundResult, gameState, clearRoundResult]);
 
   const isMyTurn = gameState?.currentTurnPlayerId === myId;
   const myState = gameState?.playerStates[myId];
@@ -273,6 +286,13 @@ export function GameBoard() {
             {nameOf(gameState.currentTurnPlayerId)}&apos;s turn
           </span>
         )}
+        <button
+          className="btn btn-ghost btn-sm"
+          onClick={() => setScoresOpen(true)}
+          title="Show all players' cumulative scores"
+        >
+          📊 Scores
+        </button>
         <button className="btn btn-ghost btn-sm" onClick={leaveRoom}>
           Leave
         </button>
@@ -368,7 +388,7 @@ export function GameBoard() {
             {topDiscard ? (
               <CardView card={topDiscard} size="md" />
             ) : (
-              <div style={{ width: 58, height: 82, borderRadius: 5, border: '1.5px dashed rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div style={{ width: 70, height: 98, borderRadius: 5, border: '1.5px dashed rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <span style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.25)' }}>empty</span>
               </div>
             )}
@@ -578,7 +598,7 @@ export function GameBoard() {
         <div className="go-down-panel" style={{ borderTopColor: 'var(--warning)' }}>
           <div className="row" style={{ justifyContent: 'space-between' }}>
             <span style={{ color: 'var(--warning)', fontSize: '0.88rem', fontWeight: 600 }}>
-              Taking all {discardPile.length} — click a card from your hand to return to the pile
+              Taking all {discardPile.length} — click a card from your hand to put back. Your turn will end.
             </span>
             <button className="btn btn-ghost btn-sm" onClick={cancelMode}>Cancel</button>
           </div>
@@ -737,6 +757,17 @@ export function GameBoard() {
         />
       )}
 
+      {/* ── Scores panel (open from header button) ── */}
+      {scoresOpen && (
+        <ScoresPanel
+          players={room?.players ?? []}
+          gameState={gameState}
+          scores={scores}
+          myId={myId}
+          onClose={() => setScoresOpen(false)}
+        />
+      )}
+
       {/* ── Round result overlay ── */}
       {roundResult && (
         <div className="overlay">
@@ -792,8 +823,11 @@ export function GameBoard() {
                 Next dealer: <strong style={{ color: 'var(--text-primary)' }}>{nameOf(roundResult.nextDealerId)}</strong>
               </div>
             )}
-            <button className="btn btn-primary" style={{ marginTop: 12 }} onClick={clearRoundResult}>
-              Continue
+            <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', textAlign: 'center', margin: 0 }}>
+              Round {(roundResult.roundNumber ?? 0) + 1} starts in a few seconds…
+            </p>
+            <button className="btn btn-ghost" onClick={clearRoundResult}>
+              Dismiss
             </button>
           </div>
         </div>

@@ -394,27 +394,28 @@ async function handleRoundEnd(
     return;
   }
 
-  // Start next round (nextDealer already computed above).
-
+  // No winner yet — schedule the next round. CRITICAL: keep room.status as
+  // 'in-progress' so the frontend stays on the GameBoard and shows the
+  // round-result modal we just broadcast. Previously this flipped status to
+  // 'lobby' between rounds, which kicked players back to the WaitingRoom and
+  // hid the round summary entirely.
   room.round = {
     ...room.round,
     roundNumber: roundNumber + 1,
     dealerIndex: nextDealer,
-    state: room.round.state, // will be replaced by startGame
+    state: room.round.state, // replaced by startGame below
     cumulativeScores,
     roundScores: room.round.roundScores,
   };
 
-  // Reset ready states for next round.
-  for (const p of room.players) p.isReady = false;
-  room.status = 'lobby';
-
-  broadcastRoomUpdate(io, room);
-
-  // Give clients 3 s to read the round result, then start next round.
+  // Give clients ~5s to read the round result, then start the next round.
+  // startGame resets per-round state (hands, deck, discard, melds,
+  // hasGoneDown, didTakeFromDiscardThisTurn, etc.) and broadcasts the
+  // fresh game:state, which the frontend uses to clear the round result
+  // modal. Cumulative scores are preserved on room.round.cumulativeScores.
   setTimeout(() => {
     startGame(room, io).catch((err) => {
       console.error(`[game] Failed to start next round in room ${roomId}:`, err);
     });
-  }, 3000);
+  }, 5000);
 }

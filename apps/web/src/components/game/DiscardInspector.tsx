@@ -220,11 +220,12 @@ export function DiscardInspector({
                 <>Leave-bottom takes every card except the oldest one — that card stays on the pile and you do <strong>not</strong> need to discard from hand. </>
               )}
               {canTakeAll && (
-                <>Take-all swaps the entire pile into your hand and puts one of your cards onto the pile in its place.</>
+                <>Take-all swaps the entire pile into your hand and puts one of your cards onto the pile in its place. </>
               )}
               {pile.length === 1 && (
-                <> With only 1 card on the pile, take-all is the only legal pickup.</>
+                <>With only 1 card on the pile, take-all is the only legal pickup. </>
               )}
+              <strong>Either action ends your turn — you cannot go down or extend a meld this turn.</strong>
             </p>
           </div>
         )}

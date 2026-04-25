@@ -511,7 +511,7 @@ a:focus-visible {
 .hand-scroll {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 6px;
   padding: 8px 12px 8px;
   flex: 1;
   align-items: flex-end;

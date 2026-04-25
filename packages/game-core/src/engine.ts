@@ -262,19 +262,39 @@ function applyTakeDiscard(
     newHand = removeCardsFromHand(newHand, [action.returnCardFromHand]);
   }
 
-  return {
-    ok: true,
-    state: {
-      ...state,
-      discardPile: newPile,
-      turnPhase: 'holding',
-      didTakeFromDiscardThisTurn: true,
-      playerStates: {
-        ...state.playerStates,
-        [playerId]: { ...ps, hand: newHand },
-      },
+  // Take-from-discard fully resolves the turn. Per the rules, the player
+  // CANNOT discard, go-down, or add-to-meld after taking from the discard
+  // pile — the take itself ends the turn. The post-state restriction on
+  // go-down / add-to-meld within this turn becomes moot because the turn
+  // is no longer this player's. The didTakeFromDiscardThisTurn flag still
+  // stays true through the action (visible to broadcast/UI for the brief
+  // moment before turn advance) and resets to false on advanceTurn.
+  let newState: RoundState = {
+    ...state,
+    discardPile: newPile,
+    didTakeFromDiscardThisTurn: true,
+    playerStates: {
+      ...state.playerStates,
+      [playerId]: { ...ps, hand: newHand },
     },
   };
+
+  // Hand-empty edge case can't normally arise here (take adds N cards,
+  // optionally removes 1 — net non-negative change for any pile.length >= 1)
+  // but kept as a defensive parallel to applyDiscard's check.
+  if (newHand.length === 0) {
+    return finishRound(newState, 'player-finished', playerId);
+  }
+
+  // Advance to the next player. advanceTurn flips turnPhase back to
+  // 'awaiting-draw-or-take' and resets didTakeFromDiscardThisTurn.
+  newState = advanceTurn(newState);
+
+  if (isRoundOverByExhaustion(newState)) {
+    return finishRound(newState, 'deck-exhausted', null);
+  }
+
+  return { ok: true, state: newState };
 }
 
 // ─── go-down ──────────────────────────────────────────────────────────────────

@@ -572,9 +572,23 @@ async function startGame(room: RoomState, io: CalashServer): Promise<void> {
   const { initRound, toRoundStateView } = await import('@calash/game-core');
 
   const playerIds = room.players.map((p) => p.userId);
-  const dealerIndex = 0;
-  const roundNumber = 1;
 
+  // Honor pre-existing round state when present (this is a follow-on round
+  // after handleRoundEnd advanced dealer + roundNumber). On first call,
+  // start at round 1 with dealerIndex 0 and zeroed cumulative scores.
+  const previous = room.round;
+  const roundNumber = previous ? previous.roundNumber : 1;
+  const dealerIndex = previous ? previous.dealerIndex : 0;
+  const cumulativeScores = previous
+    ? previous.cumulativeScores
+    : Object.fromEntries(playerIds.map((id) => [id, 0]));
+  const roundScores = previous
+    ? previous.roundScores
+    : Object.fromEntries(playerIds.map((id) => [id, []]));
+
+  // initRound builds a fresh deck/hand/discard for THIS round. All
+  // round-only state (hands, melds, hasGoneDown, didTakeFromDiscardThisTurn,
+  // discard pile, hidden deck, table totals) is reinitialized here.
   const roundState = initRound({ playerIds, roundNumber, dealerIndex });
 
   const roundRow = await db.rounds.create({
@@ -597,8 +611,8 @@ async function startGame(room: RoomState, io: CalashServer): Promise<void> {
     roundNumber,
     dealerIndex,
     state: roundState,
-    cumulativeScores: Object.fromEntries(playerIds.map((id) => [id, 0])),
-    roundScores: Object.fromEntries(playerIds.map((id) => [id, []])),
+    cumulativeScores,
+    roundScores,
   };
 
   io.to(room.roomId).emit('room:updated', toGameRoom(room));
