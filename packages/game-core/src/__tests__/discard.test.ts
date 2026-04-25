@@ -14,84 +14,92 @@ const E = rc('10', 'hearts');
 const HAND_CARD = rc('2', 'clubs');
 
 // ─── validateTakeFromDiscard ─────────────────────────────────────────────────
+//
+// Rules:
+//   LEAVE-ONE      : count === pile.length - 1, no returnCardFromHand
+//                    (requires pile.length >= 2)
+//   TAKE-ALL-REPLACE: count === pile.length, returnCardFromHand provided
+//                    (works for any pile.length >= 1)
+//
+// Anything else is invalid: the post-state must have exactly 1 card.
 
-describe('validateTakeFromDiscard', () => {
-  describe('pile with 2 cards (standard rule)', () => {
-    it('allows taking 1 (pile.length - 1)', () => {
-      expect(validateTakeFromDiscard([A, B], 1).valid).toBe(true);
-    });
-
-    it('rejects taking 2 (pile would be empty)', () => {
-      expect(validateTakeFromDiscard([A, B], 2).valid).toBe(false);
-    });
-
-    it('rejects taking 0', () => {
-      expect(validateTakeFromDiscard([A, B], 0).valid).toBe(false);
-    });
+describe('validateTakeFromDiscard — leave-one mode', () => {
+  it('allows take=1 from a 2-card pile (leaving the bottom card)', () => {
+    expect(validateTakeFromDiscard([A, B], 1).valid).toBe(true);
   });
 
-  describe('pile with 3 cards (standard rule)', () => {
-    it('allows taking 2 (pile.length - 1)', () => {
-      expect(validateTakeFromDiscard([A, B, C], 2).valid).toBe(true);
-    });
-
-    it('rejects taking 1 (leaves 2, not allowed by general rule)', () => {
-      expect(validateTakeFromDiscard([A, B, C], 1).valid).toBe(false);
-    });
-
-    it('rejects taking 3 (would empty pile)', () => {
-      expect(validateTakeFromDiscard([A, B, C], 3).valid).toBe(false);
-    });
+  it('allows take=2 from a 3-card pile (leaving the bottom card)', () => {
+    expect(validateTakeFromDiscard([A, B, C], 2).valid).toBe(true);
   });
 
-  describe('pile with 1 card (minimum remaining)', () => {
-    it('rejects any take when only 1 card remains', () => {
-      expect(validateTakeFromDiscard([A], 1).valid).toBe(false);
-    });
+  it('allows take=3 from a 4-card pile (the standard "take 3 leave 1")', () => {
+    expect(validateTakeFromDiscard([A, B, C, D], 3).valid).toBe(true);
   });
 
-  describe('pile with 0 cards', () => {
-    it('rejects take from empty pile', () => {
-      expect(validateTakeFromDiscard([], 1).valid).toBe(false);
-    });
+  it('allows take=4 from a 5-card pile', () => {
+    expect(validateTakeFromDiscard([A, B, C, D, E], 4).valid).toBe(true);
   });
 
-  describe('pile with 4 cards (DISCARD_PILE_TAKE_ALL_THRESHOLD)', () => {
-    it('allows taking 3 (standard option A)', () => {
-      expect(validateTakeFromDiscard([A, B, C, D], 3).valid).toBe(true);
-    });
+  it('rejects providing a returnCardFromHand in leave-one mode', () => {
+    const r = validateTakeFromDiscard([A, B, C], 2, HAND_CARD);
+    expect(r.valid).toBe(false);
+    expect(r.reason).toMatch(/leave-one/i);
+  });
+});
 
-    it('allows taking all 4 when returnCardFromHand is provided (option B)', () => {
-      expect(validateTakeFromDiscard([A, B, C, D], 4, HAND_CARD).valid).toBe(true);
-    });
-
-    it('rejects taking all 4 without returning a card', () => {
-      const result = validateTakeFromDiscard([A, B, C, D], 4);
-      expect(result.valid).toBe(false);
-      expect(result.reason).toMatch(/return 1 card/i);
-    });
-
-    it('rejects taking 2 (explicitly prohibited when pile has 4)', () => {
-      expect(validateTakeFromDiscard([A, B, C, D], 2).valid).toBe(false);
-    });
-
-    it('rejects taking 1', () => {
-      expect(validateTakeFromDiscard([A, B, C, D], 1).valid).toBe(false);
-    });
+describe('validateTakeFromDiscard — take-all-replace mode', () => {
+  it('allows take=2 from a 2-card pile when a hand replacement is supplied', () => {
+    expect(validateTakeFromDiscard([A, B], 2, HAND_CARD).valid).toBe(true);
   });
 
-  describe('pile with 5 cards', () => {
-    it('allows taking 4 (pile.length - 1)', () => {
-      expect(validateTakeFromDiscard([A, B, C, D, E], 4).valid).toBe(true);
-    });
+  it('allows take=3 from a 3-card pile with replacement', () => {
+    expect(validateTakeFromDiscard([A, B, C], 3, HAND_CARD).valid).toBe(true);
+  });
 
-    it('rejects taking 3 (leaves 2)', () => {
-      expect(validateTakeFromDiscard([A, B, C, D, E], 3).valid).toBe(false);
-    });
+  it('allows take=4 from a 4-card pile with replacement', () => {
+    expect(validateTakeFromDiscard([A, B, C, D], 4, HAND_CARD).valid).toBe(true);
+  });
 
-    it('rejects taking 5 (would empty pile)', () => {
-      expect(validateTakeFromDiscard([A, B, C, D, E], 5).valid).toBe(false);
-    });
+  it('allows take=5 from a 5-card pile with replacement', () => {
+    expect(validateTakeFromDiscard([A, B, C, D, E], 5, HAND_CARD).valid).toBe(true);
+  });
+
+  it('allows taking the lone card from a 1-card pile (the previously-blocked case)', () => {
+    expect(validateTakeFromDiscard([A], 1, HAND_CARD).valid).toBe(true);
+  });
+
+  it('rejects take-all without a hand replacement', () => {
+    const r = validateTakeFromDiscard([A, B, C, D], 4);
+    expect(r.valid).toBe(false);
+    expect(r.reason).toMatch(/take-all|return|put one card/i);
+  });
+
+  it('rejects take-all without replacement on a 1-card pile', () => {
+    const r = validateTakeFromDiscard([A], 1);
+    expect(r.valid).toBe(false);
+    expect(r.reason).toMatch(/take-all|put one card|return/i);
+  });
+});
+
+describe('validateTakeFromDiscard — invalid counts', () => {
+  it('rejects take=0', () => {
+    expect(validateTakeFromDiscard([A, B], 0).valid).toBe(false);
+  });
+
+  it('rejects take=2 from a 4-card pile (would leave 2)', () => {
+    const r = validateTakeFromDiscard([A, B, C, D], 2);
+    expect(r.valid).toBe(false);
+    expect(r.reason).toMatch(/Invalid take count/i);
+  });
+
+  it('rejects take=3 from a 5-card pile (would leave 2)', () => {
+    expect(validateTakeFromDiscard([A, B, C, D, E], 3).valid).toBe(false);
+  });
+
+  it('rejects any take from an empty pile', () => {
+    const r = validateTakeFromDiscard([], 0);
+    expect(r.valid).toBe(false);
+    expect(r.reason).toMatch(/empty/i);
   });
 });
 
@@ -105,7 +113,7 @@ describe('applyTakeFromDiscard', () => {
     expect(newPile).toEqual([A]);
   });
 
-  it('leaves exactly 1 card after a standard take', () => {
+  it('leaves exactly 1 card after a leave-one take', () => {
     const { newPile } = applyTakeFromDiscard([A, B, C], 2);
     expect(newPile).toHaveLength(1);
   });
@@ -114,6 +122,12 @@ describe('applyTakeFromDiscard', () => {
     // Take all 4, return HAND_CARD — HAND_CARD becomes the sole remaining card
     const { taken, newPile } = applyTakeFromDiscard([A, B, C, D], 4, HAND_CARD);
     expect(taken).toEqual([A, B, C, D]);
+    expect(newPile).toEqual([HAND_CARD]);
+  });
+
+  it('takes the lone card from a 1-card pile and replaces it', () => {
+    const { taken, newPile } = applyTakeFromDiscard([A], 1, HAND_CARD);
+    expect(taken).toEqual([A]);
     expect(newPile).toEqual([HAND_CARD]);
   });
 

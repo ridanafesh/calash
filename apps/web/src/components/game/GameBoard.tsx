@@ -677,7 +677,7 @@ export function GameBoard() {
         {canDrawOrTake && mode === 'idle' && (
           <>
             <button className="btn btn-primary" disabled={submitting} onClick={drawFromDeck}>Draw from deck</button>
-            {discardPile.length >= 2 && (
+            {discardPile.length >= 1 && (
               <button
                 className="btn btn-ghost"
                 disabled={submitting}
@@ -729,7 +729,7 @@ export function GameBoard() {
             setDiscardInspectorOpen(false);
             takeFromDiscard();
           }}
-          onTakeAllReturn={discardPile.length === 4 ? () => {
+          onTakeAllReturn={discardPile.length >= 1 ? () => {
             setDiscardInspectorOpen(false);
             setMode('take-all-return');
           } : undefined}

@@ -1,84 +1,76 @@
 import type { Card } from '@calash/shared';
-import {
-  DISCARD_PILE_MIN_REMAINING,
-  DISCARD_PILE_TAKE_ALL_THRESHOLD,
-} from '@calash/shared';
 import type { ValidationResult } from '../meld.js';
 
 /**
  * Validate a "take from discard pile" action.
  *
- * General rule: after taking, exactly 1 card must remain on the pile.
- * This means the player must take `pile.length − 1` cards.
+ * Invariant: after the action, exactly 1 card must remain on the discard pile.
  *
- * Special case — when pile.length === DISCARD_PILE_TAKE_ALL_THRESHOLD (4):
- *   Option A: take 3, leave 1 (the standard rule).
- *   Option B: take all 4 and immediately return 1 card from hand to the pile.
- *             In this case `returnCardFromHand` must be provided.
- *   Prohibited: taking 2 (leaving 2) is explicitly NOT allowed.
+ * This invariant has exactly two legal forms:
  *
- * Design note: this function is purely structural — it does not check whether
- * the player actually holds `returnCardFromHand` in their hand.  That check
- * belongs in the turn-level action validator (rules/turn.ts) where hand state
- * is available.
+ *   - LEAVE-ONE mode:    count === pile.length - 1, returnCardFromHand absent.
+ *                        The bottom card stays on the pile.
+ *                        (When pile.length === 1, this means count === 0,
+ *                        which is a no-op — disallowed: not a real take.)
+ *
+ *   - TAKE-ALL-REPLACE:  count === pile.length, returnCardFromHand provided.
+ *                        Every existing pile card is taken into hand;
+ *                        the player puts a card from hand onto the pile so
+ *                        exactly 1 card remains.
+ *                        (Works for any pile size, including pile.length === 1.)
+ *
+ * Design note: this function is purely structural. The turn-level validator
+ * (rules/turn.ts) checks that returnCardFromHand actually lives in the
+ * player's hand.
  */
 export function validateTakeFromDiscard(
   pile: readonly Card[],
   count: number,
   returnCardFromHand?: Card,
 ): ValidationResult {
-  if (pile.length <= DISCARD_PILE_MIN_REMAINING) {
-    return {
-      valid: false,
-      reason: `Cannot take from the discard pile: only ${DISCARD_PILE_MIN_REMAINING} card remains and it must stay`,
-    };
+  if (pile.length === 0) {
+    return { valid: false, reason: 'Discard pile is empty — nothing to take' };
   }
 
-  const standardCount = pile.length - DISCARD_PILE_MIN_REMAINING; // normally pile.length − 1
-
-  if (pile.length === DISCARD_PILE_TAKE_ALL_THRESHOLD) {
-    // When pile has exactly 4 cards the player has two valid choices:
-    //   A) take 3 (the standard rule)
-    //   B) take all 4 + return 1 from hand
-
-    if (count === standardCount) {
-      // Option A — standard take
-      return { valid: true };
+  // TAKE-ALL-REPLACE: count === pile.length, return required.
+  if (count === pile.length) {
+    if (!returnCardFromHand) {
+      return {
+        valid: false,
+        reason:
+          'Take-all mode requires you to put one card from your hand onto the pile',
+      };
     }
+    return { valid: true };
+  }
 
-    if (count === pile.length) {
-      // Option B — take all, but must return a card
-      if (!returnCardFromHand) {
-        return {
-          valid: false,
-          reason:
-            'When taking all 4 cards from the discard pile you must return 1 card from your hand',
-        };
-      }
-      return { valid: true };
+  // LEAVE-ONE: count === pile.length - 1, no return.
+  // count === 0 with pile.length === 1 falls through here as "not a real take".
+  if (count === pile.length - 1 && pile.length >= 2) {
+    if (returnCardFromHand) {
+      return {
+        valid: false,
+        reason:
+          'Leave-one mode does not require a hand replacement — pass returnCardFromHand only with take-all',
+      };
     }
+    return { valid: true };
+  }
 
-    // Any other count (e.g. 2) is prohibited — the rules explicitly forbid
-    // "take 2, leave 2" even though it would be a valid move by the general rule.
+  // Any other count is invalid: the post-state would not have exactly 1 card.
+  if (pile.length === 1) {
     return {
       valid: false,
       reason:
-        `With 4 cards on the discard pile you must take 3 (leave 1) ` +
-        `or take all 4 and return 1 from hand — taking ${count} is not allowed`,
+        'With only 1 card on the pile, the only legal take is "take all and return 1 from hand"',
     };
   }
-
-  // General case: player must take exactly pile.length − 1
-  if (count !== standardCount) {
-    return {
-      valid: false,
-      reason:
-        `Must take exactly ${standardCount} card(s) from the discard pile ` +
-        `(leaving ${DISCARD_PILE_MIN_REMAINING}); requested ${count}`,
-    };
-  }
-
-  return { valid: true };
+  return {
+    valid: false,
+    reason:
+      `Invalid take count ${count} for a ${pile.length}-card pile. ` +
+      `Either take ${pile.length - 1} (leave bottom) or take all ${pile.length} and return 1 from hand.`,
+  };
 }
 
 /**

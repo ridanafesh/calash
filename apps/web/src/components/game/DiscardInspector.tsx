@@ -81,8 +81,9 @@ export function DiscardInspector({
 
   const bySuit = useMemo(() => groupBySuit(entries), [entries]);
 
-  const isFour = pile.length === 4;
   const standardTakeCount = pile.length - 1;
+  const canLeaveOne = pile.length >= 2;
+  const canTakeAll = pile.length >= 1 && !!onTakeAllReturn;
   const bottomIndex = 0;
   const topIndex = pile.length - 1;
 
@@ -197,20 +198,33 @@ export function DiscardInspector({
           )}
         </div>
 
-        {/* Take actions (unchanged logic) */}
-        {canTake && pile.length >= 2 && (
+        {/* Take actions — two legal modes, both end with exactly 1 card on pile */}
+        {canTake && pile.length >= 1 && (
           <div className="col" style={{ gap: 6 }}>
-            <button className="btn btn-primary btn-block" onClick={onTakeStandard}>
-              Take {standardTakeCount} card{standardTakeCount === 1 ? '' : 's'} (leave bottom card)
-            </button>
-            {isFour && onTakeAllReturn && (
-              <button className="btn btn-warning btn-block" onClick={onTakeAllReturn}>
-                Take all 4 + return 1 from hand
+            {canLeaveOne && (
+              <button className="btn btn-primary btn-block" onClick={onTakeStandard}>
+                Take {standardTakeCount} card{standardTakeCount === 1 ? '' : 's'} (leave bottom card)
+              </button>
+            )}
+            {canTakeAll && (
+              <button
+                className="btn btn-warning btn-block"
+                onClick={onTakeAllReturn}
+                title="You'll be prompted to choose which card from your hand replaces it"
+              >
+                Take all {pile.length} card{pile.length === 1 ? '' : 's'} + return 1 from hand
               </button>
             )}
             <p style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', margin: 0 }}>
-              Standard take grabs every card except the bottom one — that card stays on the pile.
-              {isFour && <> The "take all + return" option lets you swap an unwanted hand card onto the pile instead.</>}
+              {canLeaveOne && (
+                <>Leave-bottom takes every card except the oldest one — that card stays on the pile and you do <strong>not</strong> need to discard from hand. </>
+              )}
+              {canTakeAll && (
+                <>Take-all swaps the entire pile into your hand and puts one of your cards onto the pile in its place.</>
+              )}
+              {pile.length === 1 && (
+                <> With only 1 card on the pile, take-all is the only legal pickup.</>
+              )}
             </p>
           </div>
         )}
@@ -218,12 +232,6 @@ export function DiscardInspector({
         {!canTake && (
           <p className="info-banner" style={{ margin: 0, fontSize: '0.85rem' }}>
             You can only take from the discard pile during the draw phase of your turn.
-          </p>
-        )}
-
-        {pile.length === 1 && canTake && (
-          <p className="info-banner" style={{ margin: 0, fontSize: '0.85rem' }}>
-            Only one card on the pile — it must stay. Draw from the deck instead.
           </p>
         )}
       </div>
