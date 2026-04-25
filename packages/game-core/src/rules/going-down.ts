@@ -72,22 +72,36 @@ export function validateGoDown(
     }
   }
 
-  // Check the combined value meets the threshold
+  // Check the combined value meets the threshold.
+  //
+  // SPECIAL FINISH EXCEPTION: if the go-down would consume all of the
+  // player's hand except one final card (which they'll discard next to
+  // empty their hand and end the round with the +20 winner bonus), the
+  // threshold is bypassed.  This rewards a player who can fully finish
+  // in a single turn even when they can't reach the normal opening
+  // requirement — the round ends, scoring runs as usual.
+  //
+  // The check uses card COUNT (not just value) on purpose: the rule is
+  // "all but one", not "any opening that includes a discard".  Players
+  // who'd still have ≥1 card left in hand after the discard fall back to
+  // the normal threshold rule.
+  const allPlayedCards = melds.flatMap((m) => [...m.cards]);
+  const willFullyFinish = allPlayedCards.length === playerHand.length - 1;
+
   const combinedValue = melds.reduce((sum, m) => sum + totalCardValue(m.cards), 0);
   const minimum = goDownMinimum(highestTableTotal);
 
-  if (combinedValue < minimum) {
+  if (combinedValue < minimum && !willFullyFinish) {
     const detail = highestTableTotal === 0
       ? `First opener must reach ${GAME_CONFIG.INITIAL_GO_DOWN_MINIMUM}.`
       : `Highest table total is ${highestTableTotal}; you need at least ${minimum}.`;
     return {
       valid: false,
-      reason: `Go-down total (${combinedValue}) is below the required minimum (${minimum}). ${detail}`,
+      reason: `Go-down total (${combinedValue}) is below the required minimum (${minimum}). ${detail} (Tip: you may also open below threshold if this turn would empty your hand entirely.)`,
     };
   }
 
   // Verify all played cards exist in the player's hand (no duplicates allowed)
-  const allPlayedCards = melds.flatMap((m) => [...m.cards]);
   const handCopy = [...playerHand];
 
   for (const card of allPlayedCards) {

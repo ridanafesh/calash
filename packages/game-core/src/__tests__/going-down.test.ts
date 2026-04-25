@@ -194,3 +194,99 @@ describe('validateGoDown', () => {
     expect(result.valid).toBe(true);
   });
 });
+
+// ─── Special finish exception ────────────────────────────────────────────────
+//
+// Below-threshold openings are allowed if the player will fully empty their
+// hand this turn (go-down + final discard). The validator only sees the
+// go-down step; the engine's discard handler later detects the empty hand
+// and ends the round with the +20 winner bonus. These tests pin the
+// validator's part of the contract; engine-level tests below cover the full
+// turn including round-end + scoring.
+
+describe('validateGoDown — special finish exception', () => {
+  it('accepts a sub-threshold open when the player would have exactly 1 card left', () => {
+    // kingSet = 30 pts (well below 75). Hand has the 3 kings + 1 extra card —
+    // after this go-down, exactly 1 card stays in hand for the final discard.
+    const hand = [...kingSet, rc('2', 'spades')];
+    const result = validateGoDown(
+      [{ type: 'set', cards: kingSet }],
+      hand,
+      0,
+      false,
+      false,
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it('accepts a sub-threshold open even when other players are way ahead', () => {
+    // Threshold would be 305 (highest 300 + 5). Player only has 30 pts of melds,
+    // but would empty their hand → exception applies.
+    const hand = [...kingSet, rc('2', 'spades')];
+    const result = validateGoDown(
+      [{ type: 'set', cards: kingSet }],
+      hand,
+      300, // someone way ahead
+      false,
+      false,
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it('still rejects a sub-threshold open when ≥2 cards would remain', () => {
+    // 2 leftover cards means the player can't fully finish this turn —
+    // the normal threshold rule must still bite.
+    const hand = [...kingSet, rc('2', 'spades'), rc('3', 'spades')];
+    const result = validateGoDown(
+      [{ type: 'set', cards: kingSet }],
+      hand,
+      0,
+      false,
+      false,
+    );
+    expect(result.valid).toBe(false);
+    expect(result.reason).toMatch(/below the required minimum/i);
+  });
+
+  it('still rejects a sub-threshold open when 0 cards would remain (no card to discard)', () => {
+    // Going down with the entire hand leaves nothing to discard; the player
+    // can't end their turn legally. Reject up front so the player isn't
+    // pushed into an unwinnable state.
+    const hand = [...kingSet];
+    const result = validateGoDown(
+      [{ type: 'set', cards: kingSet }],
+      hand,
+      0,
+      false,
+      false,
+    );
+    expect(result.valid).toBe(false);
+    expect(result.reason).toMatch(/below the required minimum/i);
+  });
+
+  it('the take-from-discard restriction still applies (exception does not bypass it)', () => {
+    const hand = [...kingSet, rc('2', 'spades')];
+    const result = validateGoDown(
+      [{ type: 'set', cards: kingSet }],
+      hand,
+      0,
+      false,
+      true, // didTakeFromDiscardThisTurn
+    );
+    expect(result.valid).toBe(false);
+    expect(result.reason).toMatch(/discard pile/i);
+  });
+
+  it('the already-down restriction still applies (exception does not bypass it)', () => {
+    const hand = [...kingSet, rc('2', 'spades')];
+    const result = validateGoDown(
+      [{ type: 'set', cards: kingSet }],
+      hand,
+      0,
+      true, // hasGoneDown
+      false,
+    );
+    expect(result.valid).toBe(false);
+    expect(result.reason).toMatch(/already gone down/i);
+  });
+});

@@ -147,6 +147,16 @@ export function GameBoard() {
   const inPendingMelds = useMemo(() => pendingMelds.flatMap((m) => m.cards), [pendingMelds]);
   const pendingTotal = useMemo(() => pendingMelds.reduce((s, m) => s + sumCards(m.cards), 0), [pendingMelds]);
 
+  /**
+   * Special finish exception: a player may go down even when below the
+   * threshold IF the go-down would leave exactly one card in their hand
+   * (which they then discard, emptying the hand and ending the round
+   * with the +20 winner bonus). The engine enforces this; the UI mirrors
+   * the rule so the Submit button isn't wrongly disabled.
+   */
+  const wouldFinishHand = pendingMelds.length > 0 && inPendingMelds.length === hand.length - 1;
+  const meetsGoDownRule = pendingTotal >= goDownThreshold || wouldFinishHand;
+
   // Live meld-fitness check for the current selection — drives button state
   // and the "✓ valid sequence" / "✗ no valid meld" hint shown to the user.
   // Pure derivation; no side effects.
@@ -630,8 +640,13 @@ export function GameBoard() {
                 {mode === 'go-down' ? 'Go Down' : 'New Meld'}
               </span>
               {mode === 'go-down' && (
-                <span style={{ fontSize: '0.82rem', color: pendingTotal >= goDownThreshold ? 'var(--success)' : 'var(--text-secondary)' }}>
+                <span style={{ fontSize: '0.82rem', color: meetsGoDownRule ? 'var(--success)' : 'var(--text-secondary)' }}>
                   {pendingTotal} / {goDownThreshold} pts
+                  {wouldFinishHand && pendingTotal < goDownThreshold && (
+                    <span style={{ marginLeft: 6, color: 'var(--success)', fontWeight: 600 }}>
+                      • finish hand!
+                    </span>
+                  )}
                 </span>
               )}
             </div>
@@ -718,12 +733,23 @@ export function GameBoard() {
                 </button>
                 <button
                   className="btn btn-success btn-sm"
-                  disabled={submitting || pendingMelds.length === 0 || pendingTotal < goDownThreshold}
+                  disabled={submitting || pendingMelds.length === 0 || !meetsGoDownRule}
+                  title={
+                    pendingMelds.length === 0
+                      ? 'Add at least one meld first'
+                      : meetsGoDownRule
+                        ? wouldFinishHand && pendingTotal < goDownThreshold
+                          ? 'Below threshold, but this go-down empties your hand — round will end with +20 bonus'
+                          : undefined
+                        : `Need ${goDownThreshold} pts (or use all but one card to finish your hand)`
+                  }
                   onClick={submitGoDown}
                 >
                   {submitting
                     ? <><span className="spinner" style={{ width: 12, height: 12 }} aria-hidden="true" />Submitting…</>
-                    : `Submit (${pendingTotal} pts)`}
+                    : wouldFinishHand && pendingTotal < goDownThreshold
+                      ? `Finish & win (${pendingTotal} pts)`
+                      : `Submit (${pendingTotal} pts)`}
                 </button>
               </>
             ) : (

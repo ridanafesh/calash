@@ -217,7 +217,14 @@ function tryComposeGoDown(
     totalValue -= removed.value;
   }
 
-  if (chosen.length === 0 || totalValue < threshold) return null;
+  // Special finish exception: even if the greedy total is below threshold,
+  // the engine accepts a go-down that leaves exactly 1 card in hand (the
+  // player will discard it next, finish the round, and pocket +20). If our
+  // greedy chose enough melds to consume hand-1 cards, take it — finishing
+  // the round in a single turn beats waiting for a higher-value opening.
+  const fullyFinishes = chosen.length > 0 && hand.length - usedKeys.size === 1;
+
+  if (chosen.length === 0 || (totalValue < threshold && !fullyFinishes)) return null;
 
   return {
     type: 'go-down',
