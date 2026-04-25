@@ -318,15 +318,19 @@ function applyDiscardDrawnCard(state: RoundState, playerId: string): ApplyResult
 function applyTakeDiscard(
   state: RoundState,
   playerId: string,
-  action: { count: number; returnCardFromHand?: Card },
+  action: { keepOnPileCard?: Card; returnCardFromHand?: Card },
 ): ApplyResult {
   const { taken, newPile } = applyTakeFromDiscard(
     [...state.discardPile],
-    action.count,
+    action.keepOnPileCard,
     action.returnCardFromHand,
   );
 
   const ps = state.playerStates[playerId];
+  // First put every taken card into the hand. Then, in TAKE-ALL-REPLACE
+  // mode, remove the returned card from this combined set — that's why
+  // the player is allowed to return one of the just-picked-up cards (it's
+  // already in the hand by the time we look for it).
   let newHand = [...ps.hand, ...taken];
   if (action.returnCardFromHand) {
     newHand = removeCardsFromHand(newHand, [action.returnCardFromHand]);

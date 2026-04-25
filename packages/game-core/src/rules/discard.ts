@@ -1,96 +1,112 @@
 import type { Card } from '@calash/shared';
 import type { ValidationResult } from '../meld.js';
+import { isSameCard } from '../deck.js';
 
 /**
  * Validate a "take from discard pile" action.
  *
  * Invariant: after the action, exactly 1 card must remain on the discard pile.
  *
- * This invariant has exactly two legal forms:
+ * Two legal forms:
  *
- *   - LEAVE-ONE mode:    count === pile.length - 1, returnCardFromHand absent.
- *                        The bottom card stays on the pile.
- *                        (When pile.length === 1, this means count === 0,
- *                        which is a no-op — disallowed: not a real take.)
+ *   - LEAVE-ONE:           keepOnPileCard set, returnCardFromHand absent.
+ *                          Player picks ANY pile card to remain; every other
+ *                          pile card moves to hand. Requires pile.length ≥ 2
+ *                          (leave-one on a 1-card pile is a no-op pickup).
  *
- *   - TAKE-ALL-REPLACE:  count === pile.length, returnCardFromHand provided.
- *                        Every existing pile card is taken into hand;
- *                        the player puts a card from hand onto the pile so
- *                        exactly 1 card remains.
- *                        (Works for any pile size, including pile.length === 1.)
+ *   - TAKE-ALL-REPLACE:    returnCardFromHand set, keepOnPileCard absent.
+ *                          The whole pile moves to hand; the returned card
+ *                          (from the post-pickup hand) goes onto the pile.
+ *                          Works for any pile size ≥ 1.
  *
- * Design note: this function is purely structural. The turn-level validator
- * (rules/turn.ts) checks that returnCardFromHand actually lives in the
- * player's hand.
+ * This function is purely structural — it doesn't see the player's hand.
+ * The turn-level validator (rules/turn.ts) is responsible for the
+ * "card actually exists" checks against the post-pickup hand.
  */
 export function validateTakeFromDiscard(
   pile: readonly Card[],
-  count: number,
+  keepOnPileCard?: Card,
   returnCardFromHand?: Card,
 ): ValidationResult {
   if (pile.length === 0) {
     return { valid: false, reason: 'Discard pile is empty — nothing to take' };
   }
 
-  // TAKE-ALL-REPLACE: count === pile.length, return required.
-  if (count === pile.length) {
-    if (!returnCardFromHand) {
-      return {
-        valid: false,
-        reason:
-          'Take-all mode requires you to put one card from your hand onto the pile',
-      };
-    }
-    return { valid: true };
-  }
-
-  // LEAVE-ONE: count === pile.length - 1, no return.
-  // count === 0 with pile.length === 1 falls through here as "not a real take".
-  if (count === pile.length - 1 && pile.length >= 2) {
-    if (returnCardFromHand) {
-      return {
-        valid: false,
-        reason:
-          'Leave-one mode does not require a hand replacement — pass returnCardFromHand only with take-all',
-      };
-    }
-    return { valid: true };
-  }
-
-  // Any other count is invalid: the post-state would not have exactly 1 card.
-  if (pile.length === 1) {
+  // Exactly one mode must be specified.
+  if (keepOnPileCard && returnCardFromHand) {
     return {
       valid: false,
       reason:
-        'With only 1 card on the pile, the only legal take is "take all and return 1 from hand"',
+        'Choose one mode: either keepOnPileCard (leave one on pile) OR returnCardFromHand (take all and return one), not both',
     };
   }
-  return {
-    valid: false,
-    reason:
-      `Invalid take count ${count} for a ${pile.length}-card pile. ` +
-      `Either take ${pile.length - 1} (leave bottom) or take all ${pile.length} and return 1 from hand.`,
-  };
+  if (!keepOnPileCard && !returnCardFromHand) {
+    return {
+      valid: false,
+      reason:
+        'Specify keepOnPileCard (leave one on pile) or returnCardFromHand (take all and return one)',
+    };
+  }
+
+  if (keepOnPileCard) {
+    if (pile.length < 2) {
+      return {
+        valid: false,
+        reason:
+          'With only 1 card on the pile, leave-one is a no-op — use take-all-replace (returnCardFromHand) instead',
+      };
+    }
+    const onPile = pile.some((c) => isSameCard(c, keepOnPileCard));
+    if (!onPile) {
+      return {
+        valid: false,
+        reason: 'keepOnPileCard is not currently on the discard pile',
+      };
+    }
+    return { valid: true };
+  }
+
+  // returnCardFromHand path — structural OK; the hand-membership check
+  // happens in rules/turn.ts because only that layer sees the player hand.
+  return { valid: true };
 }
 
 /**
  * Apply a "take from discard" action to the pile, returning the cards taken
  * and the updated pile.
  *
- * The pile is ordered oldest-first (index 0 = bottom).  Taking removes from
- * the top (the end of the array).
+ * The pile is ordered oldest-first (index 0 = bottom, last = top).
+ *
+ *   - LEAVE-ONE: every card except keepOnPileCard moves to `taken`; the
+ *     pile becomes [keepOnPileCard]. The first matching pile entry is the
+ *     one that stays — duplicate physical cards (from 2-deck play) only
+ *     matter because isSameCard already disambiguates by deckIndex.
+ *   - TAKE-ALL-REPLACE: the whole pile is `taken`; the pile becomes
+ *     [returnCardFromHand]. The caller (engine) is responsible for
+ *     removing returnCardFromHand from the actor's resulting hand.
  */
 export function applyTakeFromDiscard(
   pile: Card[],
-  count: number,
+  keepOnPileCard?: Card,
   returnCardFromHand?: Card,
 ): { taken: Card[]; newPile: Card[] } {
-  const taken = pile.slice(pile.length - count);
-  let newPile = pile.slice(0, pile.length - count);
-
   if (returnCardFromHand) {
-    newPile = [...newPile, returnCardFromHand];
+    return {
+      taken: [...pile],
+      newPile: [returnCardFromHand],
+    };
   }
 
-  return { taken, newPile };
+  if (!keepOnPileCard) {
+    // Caller is broken — validateTakeFromDiscard would have rejected.
+    return { taken: [], newPile: [...pile] };
+  }
+
+  // LEAVE-ONE: locate the chosen card and split the pile around it.
+  const keepIdx = pile.findIndex((c) => isSameCard(c, keepOnPileCard));
+  if (keepIdx === -1) {
+    return { taken: [], newPile: [...pile] };
+  }
+  const taken = [...pile.slice(0, keepIdx), ...pile.slice(keepIdx + 1)];
+  return { taken, newPile: [pile[keepIdx]] };
 }

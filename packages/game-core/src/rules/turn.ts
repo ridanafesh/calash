@@ -82,13 +82,21 @@ export function validateTurnAction(action: TurnAction, ctx: TurnContext): Valida
           reason: `Cannot take from discard during phase '${ctx.turnPhase}'; must be 'awaiting-draw-or-take'`,
         };
       }
-      const pileResult = validateTakeFromDiscard(ctx.discardPile, action.count, action.returnCardFromHand);
+      const pileResult = validateTakeFromDiscard(ctx.discardPile, action.keepOnPileCard, action.returnCardFromHand);
       if (!pileResult.valid) return pileResult;
       if (action.returnCardFromHand) {
+        // In TAKE-ALL-REPLACE the player can return a card they just picked
+        // up (it's in their hand the moment after the pickup). So the
+        // membership check is against hand ∪ pile, not just hand.
         const returnCard = action.returnCardFromHand;
-        const inHand = ctx.playerHand.some((c) => isSameCard(c, returnCard));
-        if (!inHand) {
-          return { valid: false, reason: 'returnCardFromHand is not in your hand' };
+        const inHandOrPile =
+          ctx.playerHand.some((c) => isSameCard(c, returnCard)) ||
+          ctx.discardPile.some((c) => isSameCard(c, returnCard));
+        if (!inHandOrPile) {
+          return {
+            valid: false,
+            reason: 'returnCardFromHand is not in your hand or on the discard pile',
+          };
         }
       }
       return { valid: true };

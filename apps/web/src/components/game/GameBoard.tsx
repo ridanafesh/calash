@@ -229,10 +229,15 @@ export function GameBoard() {
     send({ type: 'draw-from-deck' });
   }
 
-  function takeFromDiscard() {
-    const count = discardPile.length - 1;
-    if (count < 1) return;
-    send({ type: 'take-from-discard', count });
+  /**
+   * LEAVE-ONE mode: the player picked a specific discard card to remain on
+   * the pile. Every other pile card moves to their hand. Submitted directly
+   * from inside the DiscardInspector — no follow-up hand selection needed.
+   */
+  function takeLeaveOne(keepOnPileCard: Card) {
+    send({ type: 'take-from-discard', keepOnPileCard });
+    setMode('idle');
+    setSelectedCards([]);
   }
 
   function keepDrawnCard() {
@@ -247,8 +252,18 @@ export function GameBoard() {
     send({ type: 'discard-drawn-card' });
   }
 
+  /**
+   * TAKE-ALL-REPLACE mode: the whole pile becomes part of the player's
+   * hand, then the player picks one card from the COMBINED set (their
+   * original hand plus the just-picked-up cards) to put back on the pile.
+   *
+   * The engine validates that the returned card is in `hand ∪ pile`, which
+   * is exactly the post-pickup hand. The "take-all-return" mode renders
+   * a banner and lifts every pile card into the hand area visually so the
+   * player can click any of them.
+   */
   function doTakeAll(returnCard: Card) {
-    send({ type: 'take-from-discard', count: discardPile.length, returnCardFromHand: returnCard });
+    send({ type: 'take-from-discard', returnCardFromHand: returnCard });
     setMode('idle');
     setSelectedCards([]);
   }
@@ -779,12 +794,34 @@ export function GameBoard() {
       {/* ── Take-all / add-to-meld banners ── */}
       {mode === 'take-all-return' && (
         <div className="go-down-panel" style={{ borderTopColor: 'var(--warning)' }}>
-          <div className="row" style={{ justifyContent: 'space-between' }}>
+          <div className="row" style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
             <span style={{ color: 'var(--warning)', fontSize: '0.88rem', fontWeight: 600 }}>
-              Taking all {discardPile.length} — click a card from your hand to put back. Your turn will end.
+              Taking all {discardPile.length} — pick ANY card to put back on the pile.
             </span>
             <button className="btn btn-ghost btn-sm" onClick={cancelMode}>Cancel</button>
           </div>
+          <p style={{ margin: 0, fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
+            You may return one of your existing hand cards <strong>or</strong> one of the
+            cards you just picked up from the pile (shown below in the “picked up” strip).
+            Your turn ends as soon as you click.
+          </p>
+          {discardPile.length > 0 && (
+            <div className="col" style={{ gap: 4, marginTop: 6 }}>
+              <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.55)' }}>
+                Just picked up — click any card to put it back on the pile:
+              </span>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {discardPile.map((c) => (
+                  <CardView
+                    key={cardId(c) + ':pickup'}
+                    card={c}
+                    size="sm"
+                    onClick={() => doTakeAll(c)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -987,14 +1024,14 @@ export function GameBoard() {
         <DiscardInspector
           pile={discardPile}
           canTake={canDrawOrTake}
-          onTakeStandard={() => {
+          onLeaveOne={(keep) => {
             setDiscardInspectorOpen(false);
-            takeFromDiscard();
+            takeLeaveOne(keep);
           }}
-          onTakeAllReturn={discardPile.length >= 1 ? () => {
+          onStartTakeAllReturn={() => {
             setDiscardInspectorOpen(false);
             setMode('take-all-return');
-          } : undefined}
+          }}
           onClose={() => setDiscardInspectorOpen(false)}
         />
       )}

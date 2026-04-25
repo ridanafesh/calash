@@ -228,7 +228,10 @@ describe('blocked actions while pending', () => {
     const drew = applyTurnAction(fix.state, fix.me, { type: 'draw-from-deck' });
     if (!drew.ok) return;
 
-    const r = applyTurnAction(drew.state, fix.me, { type: 'take-from-discard', count: 1 });
+    const r = applyTurnAction(drew.state, fix.me, {
+      type: 'take-from-discard',
+      keepOnPileCard: rc('K', 'spades'),
+    });
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error).toMatch(/Keep or Discard/i);
   });
@@ -261,7 +264,10 @@ describe('take-from-discard remains independent', () => {
       myHand: [rc('5', 'clubs')],
       pile: [rc('K', 'spades'), rc('K', 'hearts')],
     });
-    const r = applyTurnAction(fix.state, fix.me, { type: 'take-from-discard', count: 1 });
+    const r = applyTurnAction(fix.state, fix.me, {
+      type: 'take-from-discard',
+      keepOnPileCard: rc('K', 'spades'),
+    });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
 

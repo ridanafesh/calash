@@ -93,7 +93,9 @@ describe('Easy bot — draw phase', () => {
 
   it('takes top discard when it completes a meld in hand (set)', () => {
     // Hand has K♥ + K♠; pile-top is K♦ → completes a set.
-    // Pile must have length 2 for the bot to consider taking 1 card.
+    // Pile must have length 2 for the bot to consider taking. With the new
+    // leave-one payload the bot keeps the BOTTOM card (5♣) on the pile so
+    // the K♦ moves to its hand.
     const fix = makeFixture({
       hand: [rc('K', 'hearts'), rc('K', 'spades')],
       discardPile: [rc('5', 'clubs'), rc('K', 'diamonds')],
@@ -101,7 +103,8 @@ describe('Easy bot — draw phase', () => {
     const action = callBot(fix);
     expect(action.type).toBe('take-from-discard');
     if (action.type === 'take-from-discard') {
-      expect(action.count).toBe(1);
+      expect(action.keepOnPileCard).toEqual(rc('5', 'clubs'));
+      expect(action.returnCardFromHand).toBeUndefined();
     }
   });
 

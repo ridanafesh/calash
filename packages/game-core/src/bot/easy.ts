@@ -125,28 +125,32 @@ function chooseDrawAction(state: RoundState, hand: readonly Card[]): TurnAction 
   const pile = state.discardPile;
   const deckEmpty = state.hiddenDeck.length === 0;
 
-  // Per validateTakeFromDiscard: count must equal pile.length - 1 (leave 1 card).
-  // Only meaningful when pile.length >= 2.
-  const canTakeFromDiscard = pile.length >= 2;
+  // LEAVE-ONE mode requires pile.length >= 2 (anything smaller is a no-op).
+  // The bot deterministically keeps the BOTTOM card on the pile — it's the
+  // simplest rule and matches pre-fix behaviour, so existing replays stay
+  // semantically equivalent. The new "any card stays" flexibility is a
+  // human convenience; the bot doesn't need it strategically.
+  const canLeaveOne = pile.length >= 2;
 
   // If the deck is empty we must take from discard if at all possible — drawing
   // from deck would be invalid, and any take ends the round next turn anyway.
   if (deckEmpty) {
-    if (canTakeFromDiscard) {
-      return { type: 'take-from-discard', count: pile.length - 1 };
+    if (canLeaveOne) {
+      return { type: 'take-from-discard', keepOnPileCard: pile[0] };
     }
     // No legal action exists; engine should detect this as exhaustion before
     // calling us. Returning draw-from-deck propagates the error to the caller.
     return { type: 'draw-from-deck' };
   }
 
-  // Easy bot only considers taking when pile.length === 2 (take exactly 1 card)
-  // and the top card immediately completes a 3-card meld with two cards in hand.
+  // Easy bot only considers taking when pile.length === 2 (take exactly the
+  // top card) and that top card immediately completes a 3-card meld with
+  // two cards in hand. Top stays in hand; bottom remains on the pile.
   if (pile.length !== 2) return { type: 'draw-from-deck' };
 
   const candidate = pile[pile.length - 1];
   if (completesMeldWith(candidate, hand)) {
-    return { type: 'take-from-discard', count: 1 };
+    return { type: 'take-from-discard', keepOnPileCard: pile[0] };
   }
   return { type: 'draw-from-deck' };
 }

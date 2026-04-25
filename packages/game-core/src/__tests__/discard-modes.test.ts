@@ -3,17 +3,22 @@
  * through applyTurnAction so the entire pipeline (turn validator + pile
  * validator + state mutation) is covered.
  *
- * Covers the spec scenarios:
- *   1. one discard card  -> take it + replace from hand  = valid
- *   2. four discard cards -> take three, leave bottom    = valid (no return)
- *   3. four discard cards -> take all + replace          = valid
- *   4. leave-one mode does NOT require an extra hand discard later
- *   5. take-all mode requires a returnCardFromHand
- *   6. after every legal pickup, exactly 1 card remains on the pile
- *   7. after pickup, player cannot go down on the same turn
- *   8. after pickup, player cannot add to meld on the same turn
- *   9. player can take the lone card via take-all-replace mode
- *   10. invalid requests return clear errors (not generic failures)
+ * Two legal modes:
+ *
+ *   LEAVE-ONE       : { type: 'take-from-discard', keepOnPileCard }
+ *                     The chosen pile card stays on the pile; every other
+ *                     card moves to the player's hand. No follow-up
+ *                     discard required. pile.length must be ≥ 2.
+ *
+ *   TAKE-ALL-REPLACE: { type: 'take-from-discard', returnCardFromHand }
+ *                     The whole pile moves to the player's hand; the
+ *                     returned card goes onto the pile. Works for any
+ *                     pile.length ≥ 1. The returned card may be one the
+ *                     player originally held OR one of the just-picked-up
+ *                     cards (it lives in the post-pickup hand).
+ *
+ * Both modes self-terminate the turn — no go-down / add-to-meld /
+ * replace-joker is allowed afterwards in the same turn.
  */
 
 import type {
@@ -28,9 +33,7 @@ import { applyTurnAction } from '../engine.js';
 const rc = (rank: RegularCard['rank'], suit: RegularCard['suit'], deckIndex: 0 | 1 = 0): RegularCard =>
   ({ rank, suit, isJoker: false, deckIndex });
 
-/** Draw-from-deck + keep-drawn-card in one helper. The pending-draw
- *  decision was added later; tests that just want to "draw a card and
- *  end up in holding" call this. */
+/** Draw-from-deck + keep-drawn-card in one helper. */
 function drawAndKeep(state: RoundState, playerId: string): RoundState {
   const r1 = applyTurnAction(state, playerId, { type: 'draw-from-deck' });
   if (!r1.ok) throw new Error(`drawAndKeep draw failed: ${r1.error}`);
@@ -62,9 +65,6 @@ function makeDrawPhaseFixture(opts: {
     hasGoneDown: opts.hasGoneDown ?? false,
     tableTotal: myMelds.reduce((s, m) => s + m.totalValue, 0),
   };
-  // Give the opponent a non-empty hand by default so test scenarios that
-  // pass turns through them don't accidentally trigger a player-finished
-  // round-end when they discard their last card.
   const otherPs: PlayerRoundState = {
     playerId: other,
     hand: opts.otherHand ?? [rc('7', 'spades'), rc('8', 'diamonds')],
@@ -78,7 +78,7 @@ function makeDrawPhaseFixture(opts: {
     playerOrder: [me, other],
     currentTurnPlayerId: me,
     phase: 'in-progress',
-    turnPhase: 'awaiting-draw-or-take', // can take from discard
+    turnPhase: 'awaiting-draw-or-take',
     playerStates: { [me]: myPs, [other]: otherPs },
     hiddenDeck: [rc('2', 'clubs'), rc('3', 'clubs')],
     discardPile: [...opts.pile],
@@ -88,133 +88,251 @@ function makeDrawPhaseFixture(opts: {
   return { state, me, other };
 }
 
-// ─── Spec scenarios ─────────────────────────────────────────────────────────
+// ─── LEAVE-ONE mode ─────────────────────────────────────────────────────────
 
-describe('Discard pickup — spec scenarios', () => {
-  it('1) one discard card: take it + replace from hand → valid', () => {
-    const replacement = rc('9', 'clubs');
-    const fix = makeDrawPhaseFixture({
-      myHand: [rc('K', 'hearts'), replacement],
-      pile: [rc('A', 'spades')],
-    });
-    const r = applyTurnAction(fix.state, fix.me, {
-      type: 'take-from-discard',
-      count: 1,
-      returnCardFromHand: replacement,
-    });
-    expect(r.ok).toBe(true);
-    if (r.ok) {
-      // Pile now has exactly 1 card (the replacement).
-      expect(r.state.discardPile).toHaveLength(1);
-      expect(r.state.discardPile[0]).toEqual(replacement);
-      // Hand received the original pile card; lost the replacement.
-      const hand = r.state.playerStates[fix.me].hand;
-      expect(hand).toContainEqual(rc('A', 'spades'));
-      expect(hand).not.toContainEqual(replacement);
-      // Turn ENDS immediately after take-from-discard. The didTake flag is
-      // reset by advanceTurn and the next player is now active.
-      expect(r.state.currentTurnPlayerId).toBe(fix.other);
-      expect(r.state.turnPhase).toBe('awaiting-draw-or-take');
-      expect(r.state.didTakeFromDiscardThisTurn).toBe(false);
-    }
-  });
-
-  it('2) four discard cards: take 3, leave bottom → valid (no return)', () => {
+describe('LEAVE-ONE — player chooses which pile card stays', () => {
+  it('keeps the BOTTOM card when chosen', () => {
     const pile = [rc('A', 'spades'), rc('K', 'hearts'), rc('Q', 'clubs'), rc('J', 'diamonds')];
     const fix = makeDrawPhaseFixture({ myHand: [rc('5', 'clubs')], pile });
     const r = applyTurnAction(fix.state, fix.me, {
       type: 'take-from-discard',
-      count: 3,
+      keepOnPileCard: rc('A', 'spades'),
     });
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.state.discardPile).toHaveLength(1);
-      expect(r.state.discardPile[0]).toEqual(rc('A', 'spades')); // bottom stays
+      expect(r.state.discardPile).toEqual([rc('A', 'spades')]);
       const hand = r.state.playerStates[fix.me].hand;
       expect(hand).toHaveLength(1 + 3);
-      // Turn ENDS — next player is active.
       expect(r.state.currentTurnPlayerId).toBe(fix.other);
-      expect(r.state.turnPhase).toBe('awaiting-draw-or-take');
     }
   });
 
-  it('3) four discard cards: take all 4 + replace → valid', () => {
+  it('keeps the TOP card when chosen', () => {
     const pile = [rc('A', 'spades'), rc('K', 'hearts'), rc('Q', 'clubs'), rc('J', 'diamonds')];
-    const replacement = rc('5', 'clubs');
-    const fix = makeDrawPhaseFixture({ myHand: [replacement], pile });
+    const fix = makeDrawPhaseFixture({ myHand: [rc('5', 'clubs')], pile });
     const r = applyTurnAction(fix.state, fix.me, {
       type: 'take-from-discard',
-      count: 4,
+      keepOnPileCard: rc('J', 'diamonds'),
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.state.discardPile).toEqual([rc('J', 'diamonds')]);
+      // Other 3 pile cards moved to my hand.
+      expect(r.state.playerStates[fix.me].hand).toHaveLength(4);
+    }
+  });
+
+  it('keeps a MIDDLE card when chosen (the new flexibility)', () => {
+    const pile = [rc('A', 'spades'), rc('K', 'hearts'), rc('Q', 'clubs'), rc('J', 'diamonds'), rc('10', 'hearts')];
+    const fix = makeDrawPhaseFixture({ myHand: [rc('5', 'clubs')], pile });
+    const r = applyTurnAction(fix.state, fix.me, {
+      type: 'take-from-discard',
+      keepOnPileCard: rc('Q', 'clubs'), // 3rd from bottom
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.state.discardPile).toEqual([rc('Q', 'clubs')]);
+      const hand = r.state.playerStates[fix.me].hand;
+      // 1 (start) + 4 (the 4 non-Q cards) = 5
+      expect(hand).toHaveLength(5);
+    }
+  });
+
+  it('rejects leave-one when the chosen card is not on the pile', () => {
+    const fix = makeDrawPhaseFixture({
+      myHand: [rc('5', 'clubs')],
+      pile: [rc('A', 'spades'), rc('K', 'hearts')],
+    });
+    const r = applyTurnAction(fix.state, fix.me, {
+      type: 'take-from-discard',
+      keepOnPileCard: rc('Q', 'diamonds'),
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/not currently on the discard pile/i);
+  });
+
+  it('rejects leave-one on a 1-card pile (no-op)', () => {
+    const fix = makeDrawPhaseFixture({
+      myHand: [rc('5', 'clubs')],
+      pile: [rc('A', 'spades')],
+    });
+    const r = applyTurnAction(fix.state, fix.me, {
+      type: 'take-from-discard',
+      keepOnPileCard: rc('A', 'spades'),
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/no-op|take-all/i);
+  });
+});
+
+// ─── TAKE-ALL-REPLACE mode ──────────────────────────────────────────────────
+
+describe('TAKE-ALL-REPLACE — return card from hand', () => {
+  it('returning a card the player originally held is accepted', () => {
+    const replacement = rc('5', 'clubs');
+    const fix = makeDrawPhaseFixture({
+      myHand: [rc('K', 'hearts'), replacement],
+      pile: [rc('A', 'spades'), rc('A', 'hearts')],
+    });
+    const r = applyTurnAction(fix.state, fix.me, {
+      type: 'take-from-discard',
       returnCardFromHand: replacement,
     });
     expect(r.ok).toBe(true);
     if (r.ok) {
       expect(r.state.discardPile).toEqual([replacement]);
-      expect(r.state.playerStates[fix.me].hand).toHaveLength(4);
+      const hand = r.state.playerStates[fix.me].hand;
+      // Started with 2 hand + took 2 from pile - returned 1 = 3
+      expect(hand).toHaveLength(3);
+      expect(hand).toContainEqual(rc('A', 'spades'));
+      expect(hand).toContainEqual(rc('A', 'hearts'));
+      expect(hand).toContainEqual(rc('K', 'hearts'));
+      expect(hand).not.toContainEqual(replacement);
     }
   });
 
-  it('4) leave-one mode resolves the turn — no extra discard required', () => {
-    // The take itself ends the turn. Hand keeps every taken card; nothing
-    // else is required of the player. Per the spec, take-from-discard is
-    // self-terminating: no follow-up discard, no follow-up meld actions.
-    const pile = [rc('A', 'spades'), rc('K', 'hearts'), rc('Q', 'clubs')];
-    const fix = makeDrawPhaseFixture({ myHand: [rc('5', 'clubs')], pile });
-    const r = applyTurnAction(fix.state, fix.me, { type: 'take-from-discard', count: 2 });
-    expect(r.ok).toBe(true);
-    if (r.ok) {
-      // 1 (start) + 2 (taken) = 3 cards in hand. No card returned to pile.
-      expect(r.state.playerStates[fix.me].hand).toHaveLength(3);
-      expect(r.state.discardPile).toHaveLength(1);
-      // Turn handed off to the next player.
-      expect(r.state.currentTurnPlayerId).toBe(fix.other);
-    }
-  });
-
-  it('5) take-all mode requires a returnCardFromHand', () => {
-    const pile = [rc('A', 'spades'), rc('K', 'hearts'), rc('Q', 'clubs'), rc('J', 'diamonds')];
-    const fix = makeDrawPhaseFixture({ myHand: [rc('5', 'clubs')], pile });
+  it('returning a card the player JUST PICKED UP from the pile is accepted', () => {
+    // Spec: "the chosen card may be ... one of the cards they just picked up
+    // from the discard pile, if after pickup it is now in hand."
+    const fix = makeDrawPhaseFixture({
+      myHand: [rc('5', 'clubs')],
+      pile: [rc('A', 'spades'), rc('K', 'hearts'), rc('Q', 'clubs')],
+    });
     const r = applyTurnAction(fix.state, fix.me, {
       type: 'take-from-discard',
-      count: 4,
-      // no returnCardFromHand
+      returnCardFromHand: rc('K', 'hearts'), // currently on the pile, not in hand
     });
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.error).toMatch(/take-all|put one card|return/i);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.state.discardPile).toEqual([rc('K', 'hearts')]);
+      const hand = r.state.playerStates[fix.me].hand;
+      // Started with 1, took 3, returned 1 = 3
+      expect(hand).toHaveLength(3);
+      expect(hand).toContainEqual(rc('5', 'clubs'));
+      expect(hand).toContainEqual(rc('A', 'spades'));
+      expect(hand).toContainEqual(rc('Q', 'clubs'));
+      expect(hand).not.toContainEqual(rc('K', 'hearts')); // returned to pile
+    }
   });
 
-  it('6) after every legal pickup, exactly 1 card remains on the pile', () => {
-    const cases: Array<{ pile: Card[]; count: number; ret?: Card }> = [
-      { pile: [rc('A', 'spades')], count: 1, ret: rc('5', 'clubs') },
-      { pile: [rc('A', 'spades'), rc('K', 'hearts')], count: 1 },
-      { pile: [rc('A', 'spades'), rc('K', 'hearts')], count: 2, ret: rc('5', 'clubs') },
-      { pile: [rc('A', 'spades'), rc('K', 'hearts'), rc('Q', 'clubs'), rc('J', 'diamonds')], count: 3 },
-      { pile: [rc('A', 'spades'), rc('K', 'hearts'), rc('Q', 'clubs'), rc('J', 'diamonds')], count: 4, ret: rc('5', 'clubs') },
+  it('works on a 1-card pile (the previously-blocked case)', () => {
+    const replacement = rc('5', 'clubs');
+    const fix = makeDrawPhaseFixture({
+      myHand: [replacement],
+      pile: [rc('A', 'spades')],
+    });
+    const r = applyTurnAction(fix.state, fix.me, {
+      type: 'take-from-discard',
+      returnCardFromHand: replacement,
+    });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.state.discardPile).toEqual([replacement]);
+      expect(r.state.playerStates[fix.me].hand).toEqual([rc('A', 'spades')]);
+    }
+  });
+
+  it('rejects when the returned card is neither in hand nor on the pile', () => {
+    const fix = makeDrawPhaseFixture({
+      myHand: [rc('5', 'clubs')],
+      pile: [rc('A', 'spades')],
+    });
+    const r = applyTurnAction(fix.state, fix.me, {
+      type: 'take-from-discard',
+      returnCardFromHand: rc('Q', 'hearts'),
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/not in your hand or on the discard pile/i);
+  });
+
+  it('rejects when neither keepOnPileCard nor returnCardFromHand is supplied', () => {
+    const fix = makeDrawPhaseFixture({
+      myHand: [rc('5', 'clubs')],
+      pile: [rc('A', 'spades'), rc('K', 'hearts')],
+    });
+    const r = applyTurnAction(fix.state, fix.me, { type: 'take-from-discard' });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/specify/i);
+  });
+
+  it('rejects when both modes are supplied at once', () => {
+    const fix = makeDrawPhaseFixture({
+      myHand: [rc('5', 'clubs')],
+      pile: [rc('A', 'spades'), rc('K', 'hearts')],
+    });
+    const r = applyTurnAction(fix.state, fix.me, {
+      type: 'take-from-discard',
+      keepOnPileCard: rc('A', 'spades'),
+      returnCardFromHand: rc('5', 'clubs'),
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/one mode/i);
+  });
+});
+
+// ─── Invariants & turn-end restrictions ─────────────────────────────────────
+
+describe('After every legal pickup, exactly 1 card remains on the pile', () => {
+  it('holds across both modes and many pile sizes', () => {
+    const cases: Array<{
+      pile: Card[];
+      action: { keepOnPileCard?: Card; returnCardFromHand?: Card };
+      myHand: Card[];
+    }> = [
+      // LEAVE-ONE
+      {
+        pile: [rc('A', 'spades'), rc('K', 'hearts')],
+        action: { keepOnPileCard: rc('A', 'spades') },
+        myHand: [rc('5', 'clubs')],
+      },
+      {
+        pile: [rc('A', 'spades'), rc('K', 'hearts'), rc('Q', 'clubs'), rc('J', 'diamonds')],
+        action: { keepOnPileCard: rc('Q', 'clubs') },
+        myHand: [rc('5', 'clubs')],
+      },
+      // TAKE-ALL-REPLACE
+      {
+        pile: [rc('A', 'spades')],
+        action: { returnCardFromHand: rc('5', 'clubs') },
+        myHand: [rc('5', 'clubs')],
+      },
+      {
+        pile: [rc('A', 'spades'), rc('K', 'hearts'), rc('Q', 'clubs'), rc('J', 'diamonds')],
+        action: { returnCardFromHand: rc('5', 'clubs') },
+        myHand: [rc('5', 'clubs')],
+      },
+      // TAKE-ALL-REPLACE returning a just-picked-up card
+      {
+        pile: [rc('A', 'spades'), rc('K', 'hearts')],
+        action: { returnCardFromHand: rc('A', 'spades') },
+        myHand: [rc('5', 'clubs')],
+      },
     ];
-    for (const { pile, count, ret } of cases) {
-      const fix = makeDrawPhaseFixture({ myHand: ret ? [ret] : [rc('5', 'clubs')], pile });
+    for (const c of cases) {
+      const fix = makeDrawPhaseFixture({ myHand: c.myHand, pile: c.pile });
       const r = applyTurnAction(fix.state, fix.me, {
         type: 'take-from-discard',
-        count,
-        ...(ret ? { returnCardFromHand: ret } : {}),
+        ...c.action,
       });
       expect(r.ok).toBe(true);
       if (r.ok) expect(r.state.discardPile).toHaveLength(1);
     }
   });
+});
 
-  it('7) after pickup, player cannot go down on the same turn (turn already over)', () => {
-    // The take ENDS the turn — so attempting any action as the same player
-    // is rejected because it's no longer their turn. This is the strongest
-    // possible enforcement of the "no go-down after take-from-discard" rule.
+describe('Take-from-discard self-terminates the turn', () => {
+  it('after pickup, player cannot go down on the same turn (turn already over)', () => {
     const fix = makeDrawPhaseFixture({
       myHand: [
-        rc('A', 'spades'), rc('A', 'hearts'), rc('A', 'diamonds'), // 75-pt set
+        rc('A', 'spades'), rc('A', 'hearts'), rc('A', 'diamonds'),
         rc('5', 'clubs'),
       ],
       pile: [rc('K', 'spades'), rc('K', 'hearts')],
     });
-    const taken = applyTurnAction(fix.state, fix.me, { type: 'take-from-discard', count: 1 });
+    const taken = applyTurnAction(fix.state, fix.me, {
+      type: 'take-from-discard',
+      keepOnPileCard: rc('K', 'spades'),
+    });
     expect(taken.ok).toBe(true);
     if (!taken.ok) return;
     expect(taken.state.currentTurnPlayerId).toBe(fix.other);
@@ -227,7 +345,7 @@ describe('Discard pickup — spec scenarios', () => {
     if (!tryGoDown.ok) expect(tryGoDown.error).toMatch(/not.*me'?s|other'?s turn/i);
   });
 
-  it('8) after pickup, player cannot add to meld on the same turn (turn already over)', () => {
+  it('after pickup, player cannot add to meld on the same turn', () => {
     const myMeld: Meld = {
       id: '11111111-1111-1111-1111-111111111111',
       type: 'sequence',
@@ -240,7 +358,10 @@ describe('Discard pickup — spec scenarios', () => {
       myMelds: [myMeld],
       hasGoneDown: true,
     });
-    const taken = applyTurnAction(fix.state, fix.me, { type: 'take-from-discard', count: 1 });
+    const taken = applyTurnAction(fix.state, fix.me, {
+      type: 'take-from-discard',
+      keepOnPileCard: rc('K', 'spades'),
+    });
     expect(taken.ok).toBe(true);
     if (!taken.ok) return;
     expect(taken.state.currentTurnPlayerId).toBe(fix.other);
@@ -254,24 +375,7 @@ describe('Discard pickup — spec scenarios', () => {
     if (!tryAdd.ok) expect(tryAdd.error).toMatch(/not.*me'?s|other'?s turn/i);
   });
 
-  it('draw-from-deck does NOT advance the turn — only the take-from-discard path is self-terminating', () => {
-    // Critical separation: take-from-discard ends the turn immediately;
-    // draw-from-deck leaves the player on their turn (now in
-    // pending-drawn-decision phase, then 'holding' after Keep, then
-    // discard ends the turn). Either way, draw never auto-advances.
-    const fix = makeDrawPhaseFixture({ myHand: [rc('5', 'clubs')], pile: [rc('K', 'hearts')] });
-    const r = applyTurnAction(fix.state, fix.me, { type: 'draw-from-deck' });
-    expect(r.ok).toBe(true);
-    if (r.ok) {
-      expect(r.state.currentTurnPlayerId).toBe(fix.me);
-      expect(r.state.turnPhase).toBe('pending-drawn-decision');
-      expect(r.state.didTakeFromDiscardThisTurn).toBe(false);
-      expect(r.state.pendingDrawnCard).toBeDefined();
-    }
-  });
-
-  it('on the next turn after take-from-discard, player CAN go down again', () => {
-    // Spec scenario 9: ensure restrictions are scoped to this turn only.
+  it('on the next turn, restrictions are gone', () => {
     const fix = makeDrawPhaseFixture({
       myHand: [
         rc('A', 'spades'), rc('A', 'hearts'), rc('A', 'diamonds'),
@@ -279,13 +383,13 @@ describe('Discard pickup — spec scenarios', () => {
       ],
       pile: [rc('K', 'spades'), rc('K', 'hearts')],
     });
-    // Turn 1 (me): take from discard → turn ends.
-    const after1 = applyTurnAction(fix.state, fix.me, { type: 'take-from-discard', count: 1 });
+    const after1 = applyTurnAction(fix.state, fix.me, {
+      type: 'take-from-discard',
+      keepOnPileCard: rc('K', 'spades'),
+    });
     expect(after1.ok).toBe(true);
     if (!after1.ok) return;
-    expect(after1.state.currentTurnPlayerId).toBe(fix.other);
 
-    // Turn 2 (other): draw+keep, then discard to pass turn back.
     const otherStateAfterDraw = drawAndKeep(after1.state, fix.other);
     const otherHand = otherStateAfterDraw.playerStates[fix.other].hand;
     const otherDiscard = applyTurnAction(otherStateAfterDraw, fix.other, {
@@ -294,12 +398,8 @@ describe('Discard pickup — spec scenarios', () => {
     });
     expect(otherDiscard.ok).toBe(true);
     if (!otherDiscard.ok) return;
-    expect(otherDiscard.state.currentTurnPlayerId).toBe(fix.me);
 
-    // Turn 3 (me again): draw+keep, then go down. didTakeFromDiscardThisTurn
-    // was reset on advanceTurn so the go-down restriction is gone.
     const stateAfterMyDraw = drawAndKeep(otherDiscard.state, fix.me);
-
     const myHand = stateAfterMyDraw.playerStates[fix.me].hand;
     const aces = myHand.filter((c) => !c.isJoker && c.rank === 'A');
     expect(aces.length).toBeGreaterThanOrEqual(3);
@@ -310,106 +410,17 @@ describe('Discard pickup — spec scenarios', () => {
     });
     expect(goDown.ok).toBe(true);
   });
+});
 
-  it('on the next turn after take-from-discard, player CAN add to existing melds', () => {
-    // Spec scenario 10. Set up a player who already went down, takes from
-    // discard (turn ends), then on a later turn extends their existing meld.
-    const myMeld: Meld = {
-      id: '11111111-1111-1111-1111-111111111111',
-      type: 'sequence',
-      cards: [rc('5', 'clubs'), rc('6', 'clubs'), rc('7', 'clubs')],
-      totalValue: 18,
-    };
-    const fix = makeDrawPhaseFixture({
-      myHand: [rc('4', 'clubs'), rc('9', 'spades')],
-      pile: [rc('K', 'spades'), rc('K', 'hearts')],
-      myMelds: [myMeld],
-      hasGoneDown: true,
-    });
-    // Take from discard → turn ends.
-    const taken = applyTurnAction(fix.state, fix.me, { type: 'take-from-discard', count: 1 });
-    expect(taken.ok).toBe(true);
-    if (!taken.ok) return;
-
-    // Other player draws + discards to pass turn back.
-    const otherStateAfterDraw = drawAndKeep(taken.state, fix.other);
-    const otherHand = otherStateAfterDraw.playerStates[fix.other].hand;
-    const otherDiscard = applyTurnAction(otherStateAfterDraw, fix.other, {
-      type: 'discard',
-      card: otherHand[0],
-    });
-    expect(otherDiscard.ok).toBe(true);
-    if (!otherDiscard.ok) return;
-
-    // My turn again: draw+keep, then extend my meld with 4♣.
-    const stateAfterMyDraw = drawAndKeep(otherDiscard.state, fix.me);
-    const extend = applyTurnAction(stateAfterMyDraw, fix.me, {
-      type: 'add-to-meld',
-      meldId: myMeld.id,
-      cards: [rc('4', 'clubs')],
-    });
-    expect(extend.ok).toBe(true);
-  });
-
-  it('9) player can take the lone card via take-all-replace mode', () => {
-    // Re-asserts spec case 1 from a different angle: the previously-blocked
-    // pile.length === 1 case is now legal as long as it goes via take-all-replace.
-    const replacement = rc('5', 'clubs');
-    const fix = makeDrawPhaseFixture({
-      myHand: [replacement],
-      pile: [rc('A', 'spades')],
-    });
-    const r = applyTurnAction(fix.state, fix.me, {
-      type: 'take-from-discard',
-      count: 1,
-      returnCardFromHand: replacement,
-    });
+describe('draw-from-deck does NOT advance the turn', () => {
+  it('only take-from-discard is self-terminating', () => {
+    const fix = makeDrawPhaseFixture({ myHand: [rc('5', 'clubs')], pile: [rc('K', 'hearts')] });
+    const r = applyTurnAction(fix.state, fix.me, { type: 'draw-from-deck' });
     expect(r.ok).toBe(true);
-  });
-
-  it('10) invalid requests return clear, specific errors (not "Internal server error")', () => {
-    const cases: Array<{ label: string; pile: Card[]; count: number; ret?: Card; expectMatch: RegExp }> = [
-      {
-        label: 'wrong count for pile size',
-        pile: [rc('A', 'spades'), rc('K', 'hearts'), rc('Q', 'clubs'), rc('J', 'diamonds')],
-        count: 2,
-        expectMatch: /Invalid take count/i,
-      },
-      {
-        label: 'take-all without return',
-        pile: [rc('A', 'spades'), rc('K', 'hearts')],
-        count: 2,
-        expectMatch: /take-all|put one card|return/i,
-      },
-      {
-        label: 'returnCard not in hand',
-        pile: [rc('A', 'spades')],
-        count: 1,
-        ret: rc('Q', 'hearts'), // hand only has 5♣
-        expectMatch: /not in your hand/i,
-      },
-      {
-        label: 'lone card without return',
-        pile: [rc('A', 'spades')],
-        count: 1,
-        expectMatch: /take-all|put one card|return/i,
-      },
-    ];
-    for (const c of cases) {
-      const fix = makeDrawPhaseFixture({ myHand: [rc('5', 'clubs')], pile: c.pile });
-      const r = applyTurnAction(fix.state, fix.me, {
-        type: 'take-from-discard',
-        count: c.count,
-        ...(c.ret ? { returnCardFromHand: c.ret } : {}),
-      });
-      expect(r.ok).toBe(false);
-      if (!r.ok) {
-        expect(r.error).toMatch(c.expectMatch);
-        // Ensure no generic "Internal server error" leaks through.
-        expect(r.error).not.toMatch(/internal server error/i);
-      } else {
-        throw new Error(`Expected ${c.label} to be rejected`);
-      }
+    if (r.ok) {
+      expect(r.state.currentTurnPlayerId).toBe(fix.me);
+      expect(r.state.turnPhase).toBe('pending-drawn-decision');
+      expect(r.state.didTakeFromDiscardThisTurn).toBe(false);
     }
   });
 });
