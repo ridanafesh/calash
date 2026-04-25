@@ -585,6 +585,83 @@ a:focus-visible {
   overflow: hidden;
 }
 
+/* ── Top-half "Go Down" popup ─────────────────────────────────────────────────
+   Overlay panel anchored to the top half of the viewport. Critical
+   constraints:
+     - position: fixed so it doesn't reserve space in the flex column
+       (the hand keeps its full normal layout below).
+     - Bounded to ~top 50vh; pointer-events stay on this element only.
+     - The page below is NOT covered (no full-screen backdrop) — the
+       player's hand stays fully clickable. A subtle gradient on the
+       popup's bottom edge visually separates it from the hand area
+       without dimming the hand.
+     - Internal flex column with .go-down-popup-body owning overflow,
+       so a long pending-melds list scrolls inside the popup. */
+.go-down-popup {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  /* Cap a touch under 50vh so the discount-pile preview / table area
+     remains glance-able above the hand. */
+  max-height: 50vh;
+  z-index: 60;
+  background: linear-gradient(180deg, rgba(15, 17, 23, 0.97) 0%, rgba(15, 17, 23, 0.93) 85%, rgba(15, 17, 23, 0.0) 100%);
+  border-bottom: 2px solid var(--accent);
+  box-shadow: 0 14px 30px -12px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+  padding: 14px 16px 18px;
+  gap: 10px;
+  /* Slide-in feel without being distracting. */
+  animation: go-down-popup-in 0.16s ease-out;
+}
+
+@keyframes go-down-popup-in {
+  from { transform: translateY(-12px); opacity: 0; }
+  to   { transform: translateY(0);     opacity: 1; }
+}
+
+.go-down-popup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.go-down-popup-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+
+.go-down-popup-body {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* When the popup is used the .pending-melds list is the scrolling region. */
+.go-down-popup .pending-melds {
+  flex: 1 1 auto;
+  min-height: 80px;
+}
+
+.go-down-popup-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  flex-shrink: 0;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
 /* Sub-section that holds the actual list of pending meld chips. Takes the
    panel's flex space and owns the scroll, so the header (title + Cancel)
    and footer (Submit + meld-type buttons) remain visible while the player

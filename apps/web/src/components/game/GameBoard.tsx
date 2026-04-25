@@ -646,24 +646,17 @@ export function GameBoard() {
         </div>
       </div>
 
-      {/* ── Go-down builder panel ── */}
-      {(mode === 'go-down' || mode === 'add-new-meld') && (
+      {/* ── Add-new-meld inline panel ──
+          add-new-meld is a brief, one-shot interaction (select cards →
+          press Submit) so it stays inline. Go-Down mode has its own
+          top-half popup further below, since that flow needs persistent
+          space for the selected-melds list while keeping the hand
+          fully usable. */}
+      {mode === 'add-new-meld' && (
         <div className="go-down-panel">
           <div className="row" style={{ justifyContent: 'space-between', marginBottom: 4 }}>
             <div className="row" style={{ gap: 8 }}>
-              <span style={{ fontWeight: 700, fontSize: '0.88rem' }}>
-                {mode === 'go-down' ? 'Go Down' : 'New Meld'}
-              </span>
-              {mode === 'go-down' && (
-                <span style={{ fontSize: '0.82rem', color: meetsGoDownRule ? 'var(--success)' : 'var(--text-secondary)' }}>
-                  {pendingTotal} / {goDownThreshold} pts
-                  {wouldFinishHand && pendingTotal < goDownThreshold && (
-                    <span style={{ marginLeft: 6, color: 'var(--success)', fontWeight: 600 }}>
-                      • finish hand!
-                    </span>
-                  )}
-                </span>
-              )}
+              <span style={{ fontWeight: 700, fontSize: '0.88rem' }}>New Meld</span>
             </div>
             <button className="btn btn-ghost btn-sm" onClick={cancelMode} disabled={submitting}>Cancel</button>
           </div>
@@ -679,56 +672,12 @@ export function GameBoard() {
             </div>
           )}
 
-          {/* Selected Melds preview — only meaningful in go-down mode where
-              the player builds up a list of melds before submitting. In
-              add-new-meld mode there's no batching: one selection submits
-              one meld immediately, so we skip the section there. The list
-              container has its own scroll so a long pending-melds list
-              never pushes the panel controls — or the bottom-anchored hand
-              — off-screen. */}
-          {mode === 'go-down' && (
-            <div
-              className="col"
-              style={{ gap: 4, minHeight: 0, flex: '1 1 auto', overflow: 'hidden' }}
-            >
-              <span
-                style={{
-                  fontSize: '0.7rem',
-                  fontWeight: 600,
-                  color: 'rgba(255,255,255,0.55)',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.04em',
-                }}
-              >
-                Selected melds {pendingMelds.length > 0 && `(${pendingMelds.length})`}
-              </span>
-              <div className="pending-melds">
-                {pendingMelds.map((pm, i) => (
-                  <div key={i} className="pending-meld-item">
-                    <span style={{ fontSize: '0.7rem', color: 'var(--accent)', marginRight: 3 }}>{pm.type}</span>
-                    {pm.cards.map((c) => <CardView key={cardId(c)} card={c} size="xs" />)}
-                    <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginLeft: 3 }}>
-                      ({sumCards(pm.cards)})
-                    </span>
-                    <button
-                      className="btn-icon"
-                      style={{ fontSize: 11 }}
-                      disabled={submitting}
-                      onClick={() => setPendingMelds((p) => p.filter((_, j) => j !== i))}
-                    >✕</button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
           <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
               {selectedCards.length > 0
                 ? `${selectedCards.length} selected (${sumCards(selectedCards)} pts)`
                 : 'Select cards below'}
             </span>
-            {/* Live fitness hint — drives confidence about which button to press. */}
             {selectedCards.length >= 3 && (
               <span
                 style={{
@@ -751,65 +700,22 @@ export function GameBoard() {
                       : '✗ not a valid meld'}
               </span>
             )}
-            {mode === 'go-down' ? (
-              <>
-                <button
-                  className="btn btn-ghost btn-sm"
-                  disabled={submitting || !meldFitness.isValidSet}
-                  title={meldFitness.isValidSet ? 'Add as set' : 'Selected cards do not form a valid set (same rank, distinct suits)'}
-                  onClick={() => addToPendingMeld('set')}
-                >
-                  + Set
-                </button>
-                <button
-                  className="btn btn-ghost btn-sm"
-                  disabled={submitting || !meldFitness.isValidSequence}
-                  title={meldFitness.isValidSequence ? 'Add as sequence' : 'Selected cards do not form a valid sequence (same suit, consecutive ranks)'}
-                  onClick={() => addToPendingMeld('sequence')}
-                >
-                  + Sequence
-                </button>
-                <button
-                  className="btn btn-success btn-sm"
-                  disabled={submitting || pendingMelds.length === 0 || !meetsGoDownRule}
-                  title={
-                    pendingMelds.length === 0
-                      ? 'Add at least one meld first'
-                      : meetsGoDownRule
-                        ? wouldFinishHand && pendingTotal < goDownThreshold
-                          ? 'Below threshold, but this go-down empties your hand — round will end with +20 bonus'
-                          : undefined
-                        : `Need ${goDownThreshold} pts (or use all but one card to finish your hand)`
-                  }
-                  onClick={submitGoDown}
-                >
-                  {submitting
-                    ? <><span className="spinner" style={{ width: 12, height: 12 }} aria-hidden="true" />Submitting…</>
-                    : wouldFinishHand && pendingTotal < goDownThreshold
-                      ? `Finish & win (${pendingTotal} pts)`
-                      : `Submit (${pendingTotal} pts)`}
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  className="btn btn-ghost btn-sm"
-                  disabled={submitting || !meldFitness.isValidSet}
-                  title={meldFitness.isValidSet ? 'Submit as set' : 'Selected cards do not form a valid set'}
-                  onClick={() => submitAddNewMeld('set')}
-                >
-                  {submitting ? 'Submitting…' : 'Submit as Set'}
-                </button>
-                <button
-                  className="btn btn-ghost btn-sm"
-                  disabled={submitting || !meldFitness.isValidSequence}
-                  title={meldFitness.isValidSequence ? 'Submit as sequence' : 'Selected cards do not form a valid sequence'}
-                  onClick={() => submitAddNewMeld('sequence')}
-                >
-                  {submitting ? 'Submitting…' : 'Submit as Sequence'}
-                </button>
-              </>
-            )}
+            <button
+              className="btn btn-ghost btn-sm"
+              disabled={submitting || !meldFitness.isValidSet}
+              title={meldFitness.isValidSet ? 'Submit as set' : 'Selected cards do not form a valid set'}
+              onClick={() => submitAddNewMeld('set')}
+            >
+              {submitting ? 'Submitting…' : 'Submit as Set'}
+            </button>
+            <button
+              className="btn btn-ghost btn-sm"
+              disabled={submitting || !meldFitness.isValidSequence}
+              title={meldFitness.isValidSequence ? 'Submit as sequence' : 'Selected cards do not form a valid sequence'}
+              onClick={() => submitAddNewMeld('sequence')}
+            >
+              {submitting ? 'Submitting…' : 'Submit as Sequence'}
+            </button>
           </div>
         </div>
       )}
@@ -1168,6 +1074,153 @@ export function GameBoard() {
             setSubmitting(false);
           }}
         />
+      )}
+
+      {/* ── Go-Down builder popup (top half of viewport) ──
+          Renders as a position:fixed panel anchored to the top of the
+          viewport, capped at 50vh. The hand and action bar in the bottom
+          half stay fully clickable underneath — this is intentionally NOT
+          a full-screen modal (no backdrop covering the lower half).
+          Layout requirement: do NOT also render the legacy inline
+          .go-down-panel for go-down mode (that block is gone now). */}
+      {mode === 'go-down' && (
+        <div
+          className="go-down-popup"
+          role="dialog"
+          aria-modal="false"
+          aria-label="Go down — build your opening melds"
+        >
+          <div className="go-down-popup-header">
+            <div className="row" style={{ gap: 10, flexWrap: 'wrap' }}>
+              <h2 className="go-down-popup-title">Go Down</h2>
+              <span style={{ fontSize: '0.86rem', color: meetsGoDownRule ? 'var(--success)' : 'var(--text-secondary)', fontWeight: 600 }}>
+                {pendingTotal} / {goDownThreshold} pts
+                {wouldFinishHand && pendingTotal < goDownThreshold && (
+                  <span style={{ marginLeft: 6, color: 'var(--success)' }}>• finish hand!</span>
+                )}
+              </span>
+            </div>
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={cancelMode}
+              disabled={submitting}
+              aria-label="Cancel go-down and close popup"
+            >
+              ✕ Cancel
+            </button>
+          </div>
+
+          {roomError && roomError.code !== 'AMBIGUOUS_JOKER_ASSIGNMENT' && (
+            <div className="error-banner" role="alert">
+              {roomError.message}
+              <button
+                onClick={clearError}
+                style={{ marginLeft: 8, background: 'none', border: 'none', cursor: 'pointer', color: 'inherit' }}
+                aria-label="Dismiss error"
+              >✕</button>
+            </div>
+          )}
+
+          <div className="go-down-popup-body">
+            <span
+              style={{
+                fontSize: '0.7rem',
+                fontWeight: 600,
+                color: 'rgba(255,255,255,0.55)',
+                textTransform: 'uppercase',
+                letterSpacing: '0.04em',
+                flexShrink: 0,
+              }}
+            >
+              Selected melds {pendingMelds.length > 0 && `(${pendingMelds.length})`}
+            </span>
+            <div className="pending-melds">
+              {pendingMelds.map((pm, i) => (
+                <div key={i} className="pending-meld-item">
+                  <span style={{ fontSize: '0.7rem', color: 'var(--accent)', marginRight: 3 }}>{pm.type}</span>
+                  {pm.cards.map((c) => <CardView key={cardId(c)} card={c} size="xs" />)}
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginLeft: 3 }}>
+                    ({sumCards(pm.cards)})
+                  </span>
+                  <button
+                    className="btn-icon"
+                    style={{ fontSize: 11 }}
+                    disabled={submitting}
+                    onClick={() => setPendingMelds((p) => p.filter((_, j) => j !== i))}
+                    aria-label="Remove this meld from selection"
+                  >✕</button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="go-down-popup-footer">
+            <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+              {selectedCards.length > 0
+                ? `${selectedCards.length} selected (${sumCards(selectedCards)} pts)`
+                : 'Pick cards from your hand below'}
+            </span>
+            {selectedCards.length >= 3 && (
+              <span
+                style={{
+                  fontSize: '0.72rem',
+                  fontWeight: 600,
+                  color:
+                    meldFitness.bestType === 'sequence'
+                      ? 'var(--success)'
+                      : meldFitness.bestType === 'set'
+                        ? 'var(--accent)'
+                        : 'var(--danger)',
+                }}
+              >
+                {meldFitness.isValidSequence && meldFitness.isValidSet
+                  ? '✓ valid sequence or set'
+                  : meldFitness.isValidSequence
+                    ? '✓ valid sequence'
+                    : meldFitness.isValidSet
+                      ? '✓ valid set'
+                      : '✗ not a valid meld'}
+              </span>
+            )}
+            <div style={{ flex: 1 }} />
+            <button
+              className="btn btn-ghost btn-sm"
+              disabled={submitting || !meldFitness.isValidSet}
+              title={meldFitness.isValidSet ? 'Add as set' : 'Selected cards do not form a valid set (same rank, distinct suits)'}
+              onClick={() => addToPendingMeld('set')}
+            >
+              + Set
+            </button>
+            <button
+              className="btn btn-ghost btn-sm"
+              disabled={submitting || !meldFitness.isValidSequence}
+              title={meldFitness.isValidSequence ? 'Add as sequence' : 'Selected cards do not form a valid sequence (same suit, consecutive ranks)'}
+              onClick={() => addToPendingMeld('sequence')}
+            >
+              + Sequence
+            </button>
+            <button
+              className="btn btn-success btn-sm"
+              disabled={submitting || pendingMelds.length === 0 || !meetsGoDownRule}
+              title={
+                pendingMelds.length === 0
+                  ? 'Add at least one meld first'
+                  : meetsGoDownRule
+                    ? wouldFinishHand && pendingTotal < goDownThreshold
+                      ? 'Below threshold, but this go-down empties your hand — round will end with +20 bonus'
+                      : undefined
+                    : `Need ${goDownThreshold} pts (or use all but one card to finish your hand)`
+              }
+              onClick={submitGoDown}
+            >
+              {submitting
+                ? <><span className="spinner" style={{ width: 12, height: 12 }} aria-hidden="true" />Submitting…</>
+                : wouldFinishHand && pendingTotal < goDownThreshold
+                  ? `Finish & win (${pendingTotal} pts)`
+                  : `Submit (${pendingTotal} pts)`}
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
