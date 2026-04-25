@@ -193,14 +193,15 @@ export function applyTurnAction(
 
 function buildContext(state: RoundState, playerId: string): TurnContext {
   const tableMelds: TurnContext['tableMelds'] = {};
-  for (const ps of Object.values(state.playerStates)) {
+  for (const [ownerPlayerId, ps] of Object.entries(state.playerStates)) {
     for (const meld of ps.melds) {
-      tableMelds[meld.id] = { type: meld.type, cards: meld.cards };
+      tableMelds[meld.id] = { type: meld.type, cards: meld.cards, ownerPlayerId };
     }
   }
   const ps = state.playerStates[playerId];
   return {
     turnPhase: state.turnPhase,
+    actingPlayerId: playerId,
     playerHand: ps.hand,
     hasGoneDown: ps.hasGoneDown,
     didTakeFromDiscardThisTurn: state.didTakeFromDiscardThisTurn,
@@ -445,6 +446,14 @@ function applyAddToMeld(
   const ownerId = findMeldOwner(state, action.meldId);
   if (!ownerId) return { ok: false, error: `Meld '${action.meldId}' not found` };
 
+  // Owner-only rule: belt-and-suspenders. validateTurnAction already rejects
+  // non-owner add-to-meld upstream, but enforce it here too so any future
+  // caller that bypasses validation (tests, internal helpers, future
+  // automation) can't break the rule and silently corrupt opponents' melds.
+  if (ownerId !== playerId) {
+    return { ok: false, error: 'You can only add cards to your own melds' };
+  }
+
   const actorPs = state.playerStates[playerId];
   const ownerPs = state.playerStates[ownerId];
 
@@ -497,31 +506,23 @@ function applyAddToMeld(
     return next;
   });
 
-  // Cards added to ANY meld count toward the contributor's tableTotal.
+  // Owner-only rule guarantees ownerId === playerId here, so actor and owner
+  // are the same player record. Hand, melds, and tableTotal all merge into a
+  // single derived record (no risk of one update shadowing another).
   const newActorTableTotal = actorPs.tableTotal + addedValue;
   const newHighest = Math.max(state.highestTableTotal, newActorTableTotal);
-
-  // When the actor owns the meld, the owner update and actor update target the
-  // SAME player record. Apply both updates to a single derived record so one
-  // doesn't shadow the other.
-  let newPlayerStates: RoundState['playerStates'];
-  if (ownerId === playerId) {
-    newPlayerStates = {
-      ...state.playerStates,
-      [playerId]: {
-        ...actorPs,
-        hand: newActorHand,
-        melds: updatedOwnerMelds,
-        tableTotal: newActorTableTotal,
-      },
-    };
-  } else {
-    newPlayerStates = {
-      ...state.playerStates,
-      [ownerId]: { ...ownerPs, melds: updatedOwnerMelds },
-      [playerId]: { ...actorPs, hand: newActorHand, tableTotal: newActorTableTotal },
-    };
-  }
+  const newPlayerStates: RoundState['playerStates'] = {
+    ...state.playerStates,
+    [playerId]: {
+      ...actorPs,
+      hand: newActorHand,
+      melds: updatedOwnerMelds,
+      tableTotal: newActorTableTotal,
+    },
+  };
+  // ownerPs is now equivalent to actorPs and unused; reference it once to
+  // satisfy the unused-var lint without changing runtime behavior.
+  void ownerPs;
 
   return {
     ok: true,
@@ -612,6 +613,12 @@ function applyReplaceJoker(
   const ownerId = findMeldOwner(state, action.meldId);
   if (!ownerId) return { ok: false, error: `Meld '${action.meldId}' not found` };
 
+  // Owner-only rule (defense in depth — validator also rejects). Without
+  // this, anyone could swap jokers out of opponents' melds and pocket them.
+  if (ownerId !== playerId) {
+    return { ok: false, error: 'You can only replace jokers in your own melds' };
+  }
+
   const actorPs = state.playerStates[playerId];
   const ownerPs = state.playerStates[ownerId];
   const meld = ownerPs.melds.find((m) => m.id === action.meldId);
@@ -699,34 +706,21 @@ function applyReplaceJoker(
     jokerCard,
   ];
 
-  // Recompute the OWNER's tableTotal from melds (the joker was worth 25 in
-  // the meld; the replacement card almost always has a different value, so
-  // the owner's table total changes). Note: we credit the change in value
-  // back to the meld OWNER, not the actor — the meld still belongs to the
-  // owner; the actor merely swapped a card. This mirrors how scoring views
-  // who owns the meld.
-  const newOwnerTableTotal = totalMeldValue(updatedOwnerMelds.filter((m) =>
-    ownerPs.melds.some((om) => om.id === m.id),
-  ));
-
-  let newPlayerStates: RoundState['playerStates'];
-  if (ownerId === playerId) {
-    newPlayerStates = {
-      ...state.playerStates,
-      [playerId]: {
-        ...actorPs,
-        hand: newActorHand,
-        melds: updatedOwnerMelds,
-        tableTotal: newOwnerTableTotal,
-      },
-    };
-  } else {
-    newPlayerStates = {
-      ...state.playerStates,
-      [ownerId]: { ...ownerPs, melds: updatedOwnerMelds, tableTotal: newOwnerTableTotal },
-      [playerId]: { ...actorPs, hand: newActorHand },
-    };
-  }
+  // Owner-only rule guarantees ownerId === playerId here, so the meld owner
+  // and the actor are the same player record. Recompute tableTotal from the
+  // updated melds — the joker was worth 25 in the meld, the replacement card
+  // almost always has a different value, so the table total changes.
+  const newOwnerTableTotal = totalMeldValue(updatedOwnerMelds);
+  const newPlayerStates: RoundState['playerStates'] = {
+    ...state.playerStates,
+    [playerId]: {
+      ...actorPs,
+      hand: newActorHand,
+      melds: updatedOwnerMelds,
+      tableTotal: newOwnerTableTotal,
+    },
+  };
+  void ownerPs;
 
   // highestTableTotal can decrease here in principle (joker is 25 → real
   // card might be worth less), but the canonical highestTableTotal tracks

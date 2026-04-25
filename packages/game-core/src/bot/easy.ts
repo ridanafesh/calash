@@ -98,8 +98,14 @@ export function chooseEasyAction(ctx: BotContext, opts: ChooseEasyOptions = {}):
   }
 
   if (ps.hasGoneDown) {
-    const allTableMelds = collectAllTableMelds(state);
-    const extension = findExtension(allTableMelds, hand);
+    // Owner-only rule: bots may only extend melds they themselves placed.
+    // Filter the table to the bot's own melds before searching for any
+    // legal extension. Without this filter the bot used to (and the engine
+    // used to silently allow) extending opponents' melds.
+    const ownTableMelds = collectAllTableMelds(state).filter(
+      (m) => m.ownerPlayerId === playerId,
+    );
+    const extension = findExtension(ownTableMelds, hand);
     if (extension) return extension;
 
     const newMeld = findNewMeldFromHand(hand, opts);

@@ -329,6 +329,51 @@ describe('Easy bot — legality across many real round states', () => {
   });
 });
 
+// ─── Owner-only rule (bot must not extend opponent melds) ───────────────────
+
+describe('Easy bot — never extends another player’s melds', () => {
+  it('does not target a human meld even when the bot holds an extending card', () => {
+    // Bot has gone down with its own throwaway meld. Human has a 4-card
+    // sequence on the table. Bot's hand contains a card that WOULD legally
+    // extend the human's meld. Pre-fix, the bot would emit add-to-meld with
+    // the human's meld id; engine would silently accept. Now both layers
+    // refuse.
+    const humansSeq: PlayerRoundState['melds'][number] = {
+      id: 'human-seq',
+      type: 'sequence',
+      cards: [rc('5', 'clubs'), rc('6', 'clubs'), rc('7', 'clubs')],
+      totalValue: 18,
+    };
+    const botsThrowaway: PlayerRoundState['melds'][number] = {
+      id: 'bot-mine',
+      type: 'sequence',
+      cards: [rc('2', 'spades'), rc('3', 'spades'), rc('4', 'spades')],
+      totalValue: 9,
+    };
+    const fix = makeFixture({
+      // 8♣ would extend the human's 5-6-7♣, but it's not the bot's meld so
+      // the bot must NOT propose add-to-meld against humans-seq.
+      hand: [rc('8', 'clubs'), rc('Q', 'diamonds')],
+      turnPhase: 'holding',
+      hasGoneDown: true,
+      melds: [botsThrowaway],
+      otherPlayerMelds: [humansSeq],
+    });
+    const action = callBot(fix);
+    if (action.type === 'add-to-meld') {
+      expect(action.meldId).not.toBe(humansSeq.id);
+    }
+    // The bot may pick add-new-meld, discard, or its own extension; what's
+    // forbidden is targeting the human meld. We also confirm by replaying:
+    const r = applyTurnAction(fix.state, fix.playerId, action);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      // Human's meld is still 3 cards; bot didn't touch it.
+      expect(r.state.playerStates['human1'].melds[0].cards).toHaveLength(3);
+    }
+  });
+});
+
 // Suppress unused warning for toRoundStateView; we re-export it from engine
 // and want to make sure it works alongside the bot path.
 void toRoundStateView;

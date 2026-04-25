@@ -444,7 +444,215 @@ describe('joker still scores 25 regardless of represented card', () => {
   });
 });
 
-// ─── 7. Max one joker per meld is still enforced ────────────────────────────
+// ─── 7. The exact scenarios the user reported ───────────────────────────────
+//
+// These re-test the post-picker flow: client sees AMBIGUOUS_JOKER_ASSIGNMENT,
+// player picks one, frontend re-submits with `jokerAssignment` in the payload,
+// engine accepts. Each scenario is run twice — once for each candidate the
+// picker would have offered — to prove neither choice is silently rejected.
+
+describe('resubmit-with-assignment — user-reported scenarios', () => {
+  function setupGoDownWithSequence(
+    seqCards: Card[],
+    choice: { rank: RegularCard['rank']; suit: RegularCard['suit'] },
+  ) {
+    const playerIds = ['p1', 'p2'];
+    const init = deterministicRound(playerIds);
+    const me = init.playerOrder[0];
+    // Pair the joker sequence with a 4-Aces set (60 pts) to clear the 75 threshold.
+    const aces: Card[] = [
+      rc('A', 'spades'),
+      rc('A', 'hearts'),
+      rc('A', 'diamonds'),
+      rc('A', 'clubs'),
+    ];
+    const hand: Card[] = [...aces, ...seqCards];
+    const state = withHand(init, me, hand, { hasGoneDown: false });
+    const action = {
+      type: 'go-down' as const,
+      melds: [
+        { type: 'set' as const, cards: aces },
+        {
+          type: 'sequence' as const,
+          cards: seqCards,
+          jokerAssignment: {
+            jokerIndex: 0 as 0 | 1,
+            representsRank: choice.rank,
+            representsSuit: choice.suit,
+          },
+        },
+      ],
+    };
+    return { state, me, action };
+  }
+
+  it('6♣, 7♣, joker — choose 8♣ → success', () => {
+    const { state, me, action } = setupGoDownWithSequence(
+      [rc('6', 'clubs'), rc('7', 'clubs'), jk()],
+      { rank: '8', suit: 'clubs' },
+    );
+    const result = applyTurnAction(state, me, action, testId);
+    const ok = expectOk(result);
+    const seq = ok.state.playerStates[me].melds.find((m) => m.type === 'sequence');
+    expect(seq?.jokerAssignment?.representsRank).toBe('8');
+    expect(seq?.jokerAssignment?.representsSuit).toBe('clubs');
+  });
+
+  it('6♣, 7♣, joker — choose 5♣ → success', () => {
+    const { state, me, action } = setupGoDownWithSequence(
+      [rc('6', 'clubs'), rc('7', 'clubs'), jk()],
+      { rank: '5', suit: 'clubs' },
+    );
+    const result = applyTurnAction(state, me, action, testId);
+    const ok = expectOk(result);
+    const seq = ok.state.playerStates[me].melds.find((m) => m.type === 'sequence');
+    expect(seq?.jokerAssignment?.representsRank).toBe('5');
+  });
+
+  it('10♥, J♥, joker — choose Q♥ → success', () => {
+    const { state, me, action } = setupGoDownWithSequence(
+      [rc('10', 'hearts'), rc('J', 'hearts'), jk()],
+      { rank: 'Q', suit: 'hearts' },
+    );
+    const result = applyTurnAction(state, me, action, testId);
+    const ok = expectOk(result);
+    const seq = ok.state.playerStates[me].melds.find((m) => m.type === 'sequence');
+    expect(seq?.jokerAssignment?.representsRank).toBe('Q');
+  });
+
+  it('10♥, J♥, joker — choose 9♥ → success', () => {
+    const { state, me, action } = setupGoDownWithSequence(
+      [rc('10', 'hearts'), rc('J', 'hearts'), jk()],
+      { rank: '9', suit: 'hearts' },
+    );
+    const result = applyTurnAction(state, me, action, testId);
+    const ok = expectOk(result);
+    const seq = ok.state.playerStates[me].melds.find((m) => m.type === 'sequence');
+    expect(seq?.jokerAssignment?.representsRank).toBe('9');
+  });
+
+  it('rejects an out-of-range choice with a regular error (no hang signal)', () => {
+    // The picker would never offer this, but if a malformed client sent it,
+    // the engine must respond with a plain error — NOT another
+    // AMBIGUOUS_JOKER_ASSIGNMENT, which would loop the UI.
+    const { state, me, action } = setupGoDownWithSequence(
+      [rc('6', 'clubs'), rc('7', 'clubs'), jk()],
+      { rank: '2', suit: 'clubs' },
+    );
+    const result = applyTurnAction(state, me, action, testId);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      // Critically: this should NOT come back as ambiguous.
+      expect(result.errorCode).not.toBe('AMBIGUOUS_JOKER_ASSIGNMENT');
+    }
+  });
+
+  it('after success the meld is on the table with the joker scoring as 25', () => {
+    const { state, me, action } = setupGoDownWithSequence(
+      [rc('6', 'clubs'), rc('7', 'clubs'), jk()],
+      { rank: '8', suit: 'clubs' },
+    );
+    const result = applyTurnAction(state, me, action, testId);
+    const ok = expectOk(result);
+    const ps = ok.state.playerStates[me];
+    expect(ps.hasGoneDown).toBe(true);
+    // 6 + 7 + joker(25) + 4 Aces (25 each = 100) = 138
+    expect(ps.tableTotal).toBe(
+      CARD_VALUES['6'] + CARD_VALUES['7'] + CARD_VALUES['JOKER'] + 4 * CARD_VALUES['A'],
+    );
+    // The joker is the actual joker card, not a 6/7 stand-in.
+    const seq = ps.melds.find((m) => m.type === 'sequence');
+    expect(seq?.cards.some((c) => c.isJoker)).toBe(true);
+  });
+});
+
+// ─── 8. Owner-only rule for replace-joker ────────────────────────────────────
+
+describe('replace-joker — owner-only', () => {
+  it("rejects replacing a joker in another player's meld", () => {
+    const playerIds = ['p1', 'p2'];
+    const init = deterministicRound(playerIds);
+    const me = init.playerOrder[0];
+    const opponent = init.playerOrder[1];
+
+    // Opponent has a sequence meld with a joker assigned as J♥. I happen to
+    // hold J♥. The engine must reject — ownership trumps "I have the card."
+    const j = jk(0);
+    const opponentMeld: Meld = {
+      id: testId(),
+      type: 'sequence',
+      cards: [rc('10', 'hearts'), j, rc('Q', 'hearts')],
+      totalValue: cardValue(rc('10', 'hearts')) + cardValue(j) + cardValue(rc('Q', 'hearts')),
+      jokerAssignment: { jokerIndex: 0, representsRank: 'J', representsSuit: 'hearts' },
+    };
+
+    // Inject opponent state.
+    const stateWithOpponentMeld: RoundState = {
+      ...init,
+      turnPhase: 'holding',
+      currentTurnPlayerId: me,
+      playerStates: {
+        ...init.playerStates,
+        [me]: {
+          ...init.playerStates[me],
+          hand: [rc('J', 'hearts'), rc('5', 'clubs')],
+          hasGoneDown: true,
+          melds: [
+            // Throwaway meld so I'm down
+            { id: testId(), type: 'sequence', cards: [rc('2', 'spades'), rc('3', 'spades'), rc('4', 'spades')], totalValue: 9 },
+          ],
+          tableTotal: 9,
+        },
+        [opponent]: {
+          ...init.playerStates[opponent],
+          melds: [opponentMeld],
+          hasGoneDown: true,
+          tableTotal: opponentMeld.totalValue,
+        },
+      },
+    };
+
+    const result = applyTurnAction(stateWithOpponentMeld, me, {
+      type: 'replace-joker',
+      meldId: opponentMeld.id,
+      replacementCard: rc('J', 'hearts'),
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toMatch(/your own melds/i);
+    }
+    // Opponent's meld unchanged.
+    expect(stateWithOpponentMeld.playerStates[opponent].melds[0].cards.some((c) => c.isJoker)).toBe(true);
+  });
+
+  it('still allows the owner to replace a joker in their own meld', () => {
+    const playerIds = ['p1', 'p2'];
+    const init = deterministicRound(playerIds);
+    const me = init.playerOrder[0];
+    const j = jk(0);
+    const meld: Meld = {
+      id: testId(),
+      type: 'sequence',
+      cards: [rc('10', 'hearts'), j, rc('Q', 'hearts')],
+      totalValue: cardValue(rc('10', 'hearts')) + cardValue(j) + cardValue(rc('Q', 'hearts')),
+      jokerAssignment: { jokerIndex: 0, representsRank: 'J', representsSuit: 'hearts' },
+    };
+    const state = withHand(init, me, [rc('J', 'hearts'), rc('5', 'clubs')], {
+      hasGoneDown: true,
+      melds: [meld],
+      tableTotal: meld.totalValue,
+    });
+    const result = applyTurnAction(state, me, {
+      type: 'replace-joker',
+      meldId: meld.id,
+      replacementCard: rc('J', 'hearts'),
+    });
+    expect(result.ok).toBe(true);
+  });
+});
+
+// ─── 9. Max one joker per meld is still enforced ────────────────────────────
 
 describe('only one joker per meld', () => {
   it('a sequence with two jokers is rejected by validateMeld', () => {

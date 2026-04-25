@@ -333,25 +333,24 @@ describe('applyTurnAction — go-down', () => {
   });
 });
 
-// ─── applyTurnAction — add-to-meld (MVP contribution rule) ───────────────────
+// ─── applyTurnAction — add-to-meld (owner-only rule) ────────────────────────
 
 describe('applyTurnAction — add-to-meld', () => {
-  it("updates the contributor's tableTotal (not the meld owner's)", () => {
-    // Set up: p1 has gone down with a set, p2 is about to add to p1's meld
+  it('rejects an add-to-meld targeting another player’s meld', () => {
+    // Setup: p2 (firstPlayer) goes down with a 3-card set of Aces. Then it's
+    // p1's turn and p1 has the 4th Ace. Pre-fix the engine would silently
+    // accept p1 extending p2's meld; now it must reject because melds are
+    // owner-only.
     const baseDeck = seededShuffle(createDeck(), 7);
     const state = initRound({ playerIds: ['p1', 'p2'], roundNumber: 1, dealerIndex: 0, deck: baseDeck });
 
-    // Turn order: p2 first (right of dealer p1), then p1
     const [firstPlayer, secondPlayer] = state.playerOrder; // p2 is first
 
-    // Give firstPlayer (p2) a hand with aces so they can go down
     const aceH = rc('A', 'hearts', 0);
     const aceD = rc('A', 'diamonds', 0);
     const aceC = rc('A', 'clubs', 0);
 
-    // p2's turn: draw + keep, then go-down
     const stateAfterDraw1 = drawAndKeep(state, firstPlayer);
-
     const stateWith3Aces: RoundState = {
       ...stateAfterDraw1,
       playerStates: {
@@ -371,12 +370,10 @@ describe('applyTurnAction — add-to-meld', () => {
     );
     if (!afterGoDown.ok) return;
 
-    // p2 discards to end their turn
     const p2Discard = afterGoDown.state.playerStates[firstPlayer].hand[0];
     const afterDiscard1 = applyTurnAction(afterGoDown.state, firstPlayer, { type: 'discard', card: p2Discard });
     if (!afterDiscard1.ok) return;
 
-    // Now it's p1's turn. Give p1 the 4th Ace to add to p2's meld.
     const aceS = rc('A', 'spades', 0);
     const meldId = afterGoDown.state.playerStates[firstPlayer].melds[0].id;
     const stateP1Turn: RoundState = {
@@ -385,33 +382,27 @@ describe('applyTurnAction — add-to-meld', () => {
         ...afterDiscard1.state.playerStates,
         [secondPlayer]: {
           ...afterDiscard1.state.playerStates[secondPlayer],
-          hasGoneDown: true, // Mark as gone down so p1 can add to melds
+          hasGoneDown: true,
           hand: [aceS, rc('K', 'hearts'), rc('2', 'clubs')],
         },
       },
     };
 
-    // p1 draws + keeps
     const stateAfterDraw2 = drawAndKeep(stateP1Turn, secondPlayer);
 
-    // p1 adds the 4th Ace to p2's meld
-    const p1BeforeAdd = stateAfterDraw2.playerStates[secondPlayer].tableTotal;
     const result = applyTurnAction(
       stateAfterDraw2,
       secondPlayer,
       { type: 'add-to-meld', meldId, cards: [aceS] },
     );
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toMatch(/your own melds/i);
+    }
 
-    // p1's tableTotal should increase by Ace's value (25)
-    const p1After = result.state.playerStates[secondPlayer].tableTotal;
-    expect(p1After).toBe(p1BeforeAdd + 25);
-
-    // p2's tableTotal should NOT change (they own the meld but didn't add the card)
-    const p2Before = stateAfterDraw2.playerStates[firstPlayer].tableTotal;
-    const p2After = result.state.playerStates[firstPlayer].tableTotal;
-    expect(p2After).toBe(p2Before);
+    // Belt-and-suspenders: neither player's meld list nor table total moved.
+    const p1MeldsBefore = stateAfterDraw2.playerStates[firstPlayer].melds[0].cards.length;
+    expect(stateAfterDraw2.playerStates[firstPlayer].melds[0].cards).toHaveLength(p1MeldsBefore);
   });
 });
 

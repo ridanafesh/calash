@@ -168,9 +168,22 @@ export function GameBoard() {
   // Which table melds can the current selection legally extend?
   // Used to highlight valid drop targets and to enable the in-place "extend"
   // shortcut (click meld → instant submit, no mode change).
+  //
+  // Owner-only rule: the engine rejects any add-to-meld targeting a meld
+  // the actor doesn't own. Restrict the candidate pool to MY melds so the
+  // UI never offers an opponent's meld as a drop target — both as a hint
+  // and as a click handler. (Belt-and-suspenders: even if a stale UI tries
+  // it, the server rejects it with a clear "you can only add cards to
+  // your own melds" message.)
   const extendableMeldIds = useMemo(
-    () => new Set(findExtendableMelds(selectedCards, allTableMelds)),
-    [selectedCards, allTableMelds],
+    () =>
+      new Set(
+        findExtendableMelds(
+          selectedCards,
+          allTableMelds.filter((m) => m.ownerId === myId),
+        ),
+      ),
+    [selectedCards, allTableMelds, myId],
   );
 
   function quickExtendMeld(meldId: string) {
@@ -289,19 +302,34 @@ export function GameBoard() {
   function resubmitWithJokerAssignment(choice: JokerAssignment): void {
     const last = lastAttemptedAction.current;
     if (!last) return;
+    // Capture meldIndex BEFORE clearError() — clearError nulls out roomError
+    // synchronously and the meldIndex would be lost.
+    const meldIndexFromError = roomError?.meldIndex;
     clearError();
 
+    // The first attempt failed with AMBIGUOUS_JOKER_ASSIGNMENT, which fired
+    // the roomError effect and wiped BOTH expectation refs to null. Without
+    // re-arming the right one, neither confirmation effect can fire when
+    // the second submit broadcasts back, and the spinner sticks forever.
+    // (This is the bug that caused the post-picker hang.)
+    const myMeldsNow = myState?.melds.length ?? 0;
+    const myHandLenNow = hand.length;
+
     if (last.type === 'go-down') {
-      const idx = roomError?.meldIndex ?? 0;
+      const idx = meldIndexFromError ?? 0;
       const newMelds = last.melds.map((m, i) =>
         i === idx ? { ...m, jokerAssignment: choice } : m,
       );
+      expectedMeldCountAfterSubmit.current = myMeldsNow + newMelds.length;
       setSubmitting(true);
       send({ type: 'go-down', melds: newMelds });
     } else if (last.type === 'add-new-meld') {
+      expectedMeldCountAfterSubmit.current = myMeldsNow + 1;
       setSubmitting(true);
       send({ type: 'add-new-meld', meld: { ...last.meld, jokerAssignment: choice } });
     } else if (last.type === 'add-to-meld') {
+      // add-to-meld shrinks the hand by the cards added (no new meld row).
+      expectedHandSizeAfterDiscard.current = myHandLenNow - last.cards.length;
       setSubmitting(true);
       send({ ...last, jokerAssignment: choice });
     }
@@ -318,6 +346,12 @@ export function GameBoard() {
     if (!myState?.hasGoneDown) return false;
     if (gameState?.didTakeFromDiscardThisTurn) return false;
     if (selectedCards.length !== 1) return false;
+    // Owner-only rule: only the meld's owner can swap a joker out of it.
+    // The opponent strip never marks itself as a target after this fix
+    // (canReplaceJokerNow now requires ownership), but guard here too as a
+    // safety net for any future caller of this helper.
+    const ownerId = allTableMelds.find((m) => m.id === meldId)?.ownerId;
+    if (ownerId !== myId) return false;
     const card = selectedCards[0];
     if (card.isJoker) return false;
     if (card.rank !== jokerAssignment.representsRank) return false;
@@ -361,10 +395,16 @@ export function GameBoard() {
 
   // True when the local player can attempt to replace the joker in `meld`
   // right now: it has a joker assignment, the player has gone down, hasn't
-  // taken from the discard pile this turn, and has selected exactly one card
-  // matching the joker's representsRank+suit.
-  function canReplaceJokerNow(jokerAssignment: JokerAssignment | undefined): boolean {
+  // taken from the discard pile this turn, has selected exactly one card
+  // matching the joker's representsRank+suit, AND the meld belongs to the
+  // local player (owner-only rule — never offered as a target on opponent
+  // melds, even when the local player happens to hold the matching card).
+  function canReplaceJokerNow(
+    jokerAssignment: JokerAssignment | undefined,
+    meldOwnerId: string,
+  ): boolean {
     if (!jokerAssignment) return false;
+    if (meldOwnerId !== myId) return false;
     if (!isMyTurn) return false;
     if (!myState?.hasGoneDown) return false;
     if (gameState?.didTakeFromDiscardThisTurn) return false;
@@ -444,32 +484,16 @@ export function GameBoard() {
               )}
               <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
                 {op?.melds.map((meld) => {
-                  const isQuickTarget =
-                    mode === 'idle' &&
-                    !submitting &&
-                    selectedCards.length > 0 &&
-                    extendableMeldIds.has(meld.id) &&
-                    isMyTurn &&
-                    !!myState?.hasGoneDown &&
-                    !gameState?.didTakeFromDiscardThisTurn;
-                  const canReplaceHere = canReplaceJokerNow(meld.jokerAssignment);
-                  const handleClick = canReplaceHere
-                    ? () => tryReplaceJoker(meld.id, meld.jokerAssignment!)
-                    : isQuickTarget
-                      ? () => quickExtendMeld(meld.id)
-                      : undefined;
+                  // Owner-only: opponent melds are NEVER quick-extend or
+                  // replace-joker targets. Render them read-only — visible
+                  // but not interactive. The "MINE / OPPONENT" distinction
+                  // is also reinforced by placement (opponents up top,
+                  // mine in the my-section panel below).
                   return (
                     <div
                       key={meld.id}
-                      className={`meld-group ${isQuickTarget || canReplaceHere ? 'target' : ''}`}
-                      onClick={handleClick}
-                      title={
-                        canReplaceHere
-                          ? `Click to swap your ${meld.jokerAssignment!.representsRank}${SUIT_GLYPH[meld.jokerAssignment!.representsSuit]} for the joker in this meld`
-                          : isQuickTarget
-                            ? `Click to add ${selectedCards.length} card(s) to this opponent meld`
-                            : undefined
-                      }
+                      className="meld-group"
+                      style={{ cursor: 'default' }}
                     >
                       {meld.cards.map((c) => (
                         <CardView key={cardId(c)} card={c} size="xs" />
@@ -556,7 +580,7 @@ export function GameBoard() {
               isMyTurn &&
               !!myState?.hasGoneDown &&
               !gameState?.didTakeFromDiscardThisTurn;
-            const canReplaceHere = canReplaceJokerNow(meld.jokerAssignment);
+            const canReplaceHere = canReplaceJokerNow(meld.jokerAssignment, myId);
             const showAsTarget = isExplicitTarget || isQuickTarget || canReplaceHere;
             const handleClick = canReplaceHere
               ? () => tryReplaceJoker(meld.id, meld.jokerAssignment!)

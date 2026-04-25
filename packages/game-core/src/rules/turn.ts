@@ -8,6 +8,9 @@ import { isSameCard } from '../deck.js';
 export interface TurnContext {
   /** Current sub-phase of the turn. */
   turnPhase: TurnPhase;
+  /** The id of the player whose action is being validated. Used to enforce
+   *  the owner-only rule on add-to-meld and replace-joker. */
+  actingPlayerId: string;
   /** The active player's hand. */
   playerHand: readonly Card[];
   /** Whether this player has gone down this round. */
@@ -20,8 +23,20 @@ export interface TurnContext {
   hiddenDeckCount: number;
   /** The highest total currently exposed on the table by any player. */
   highestTableTotal: number;
-  /** All melds currently on the table, keyed by meld ID. */
-  tableMelds: Record<string, { type: import('@calash/shared').MeldType; cards: readonly Card[] }>;
+  /**
+   * All melds currently on the table, keyed by meld ID.  `ownerPlayerId`
+   * is required so the validator can enforce that only the meld's owner
+   * may extend it or swap a joker out of it. Melds are publicly visible
+   * but private in ownership.
+   */
+  tableMelds: Record<
+    string,
+    {
+      type: import('@calash/shared').MeldType;
+      cards: readonly Card[];
+      ownerPlayerId: string;
+    }
+  >;
 }
 
 /**
@@ -142,6 +157,16 @@ function validateAddToMeld(
   if (!meld) {
     return { valid: false, reason: `Meld '${meldId}' not found on the table` };
   }
+  // Owner-only rule: melds are publicly visible but private in ownership.
+  // A player (or bot) may only extend melds they themselves placed. Enforced
+  // here at the validator layer; engine handlers double-check as defense in
+  // depth so a future caller that bypasses validation can't break the rule.
+  if (meld.ownerPlayerId !== ctx.actingPlayerId) {
+    return {
+      valid: false,
+      reason: 'You can only add cards to your own melds',
+    };
+  }
   if (newCards.length === 0) {
     return { valid: false, reason: 'Must provide at least one card to add to a meld' };
   }
@@ -210,8 +235,18 @@ function validateReplaceJoker(
   if (replacementCard.isJoker) {
     return { valid: false, reason: 'Replacement card cannot itself be a joker' };
   }
-  if (!ctx.tableMelds[meldId]) {
+  const meld = ctx.tableMelds[meldId];
+  if (!meld) {
     return { valid: false, reason: `Meld '${meldId}' not found on the table` };
+  }
+  // Owner-only rule: only the meld owner may swap a joker out of it.
+  // (When the swap succeeds the joker returns to the actor's hand, so
+  // letting non-owners do this would also let them poach jokers.)
+  if (meld.ownerPlayerId !== ctx.actingPlayerId) {
+    return {
+      valid: false,
+      reason: 'You can only replace jokers in your own melds',
+    };
   }
   const inHand = ctx.playerHand.some((c) => isSameCard(c, replacementCard));
   if (!inHand) {

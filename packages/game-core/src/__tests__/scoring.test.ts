@@ -31,9 +31,13 @@ function makePlayer(
 // ─── computePlayerRoundScore ─────────────────────────────────────────────────
 
 describe('computePlayerRoundScore', () => {
-  it('uses state.tableTotal directly (MVP contribution rule)', () => {
-    // tableTotal is 50 even though the player's own melds are only worth 30.
-    // This simulates the case where the player added 20pts to another player's meld.
+  it('uses state.tableTotal directly (decoupled from melds[] sum)', () => {
+    // tableTotal is the authoritative number — not recomputed from melds[].
+    // Keeping the two decoupled lets us evolve scoring (e.g. bonuses) without
+    // having to retrofit every scoring path. Cross-player meld extension is
+    // no longer allowed (owner-only rule), so today tableTotal always equals
+    // the sum of the player's own melds — but the contract here is "trust
+    // the field," not "recompute from melds."
     const player = makePlayer('p1', 50, []);
     const score = computePlayerRoundScore(player, false);
     expect(score.tableTotal).toBe(50);

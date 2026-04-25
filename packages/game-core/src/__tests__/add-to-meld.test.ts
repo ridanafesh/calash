@@ -276,42 +276,88 @@ describe('add-to-meld — turn restrictions', () => {
   });
 });
 
-// ─── Score attribution ──────────────────────────────────────────────────────
+// ─── Owner-only rule ────────────────────────────────────────────────────────
+//
+// Ownership is private even though melds are publicly visible. Only the
+// player who placed a meld may extend it (or replace a joker inside it).
+// Previously this file asserted that cross-player extension was allowed and
+// that the contributor's tableTotal absorbed the value; that rule is gone.
+// Cross-player extension must now be rejected at validation time with a
+// clear, user-facing message.
 
-describe('add-to-meld — score attribution', () => {
-  it("adds extension value to the CONTRIBUTOR's tableTotal, not the owner's", () => {
-    // I'm down with my own small meld. Opponent has a high-value meld on the
-    // table. I extend the opponent's meld with a card from hand. The added
-    // value must accrue to my tableTotal, not the opponent's.
+describe('add-to-meld — owner-only enforcement', () => {
+  it('rejects extending another player’s sequence', () => {
     const myOwnMeld: Meld = {
       id: 'mine',
       type: 'sequence',
       cards: [rc('2', 'spades'), rc('3', 'spades'), rc('4', 'spades')],
       totalValue: 9,
     };
-    const opponentMeld: Meld = { ...seqHearts10toK }; // 10-J-Q-K♥ = 40 pts
+    const opponentMeld: Meld = { ...seqHearts10toK }; // owned by opponent
     const fix = makeFixture({
       myHand: [rc('A', 'hearts'), rc('2', 'clubs')],
       myMelds: [myOwnMeld],
       otherMelds: [opponentMeld],
     });
-    const myTableBefore = fix.state.playerStates[fix.me].tableTotal;
-    const otherTableBefore = fix.state.playerStates[fix.other].tableTotal;
 
     const r = applyTurnAction(fix.state, fix.me, {
       type: 'add-to-meld',
       meldId: opponentMeld.id,
-      cards: [rc('A', 'hearts')], // A♥ = 25 pts
+      cards: [rc('A', 'hearts')],
+    });
+
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.error).toMatch(/your own melds/i);
+    }
+    // Opponent's meld is unchanged.
+    expect(fix.state.playerStates[fix.other].melds[0].cards).toHaveLength(4);
+  });
+
+  it("rejects extending another player's set", () => {
+    const opponentSet: Meld = { ...setKings3 }; // K♥ K♦ K♣, owned by opponent
+    const fix = makeFixture({
+      myHand: [rc('K', 'spades'), rc('2', 'clubs')],
+      myMelds: [
+        // Some throwaway meld so I'm down
+        { id: 'mine', type: 'sequence', cards: [rc('2', 'spades'), rc('3', 'spades'), rc('4', 'spades')], totalValue: 9 },
+      ],
+      otherMelds: [opponentSet],
+    });
+
+    const r = applyTurnAction(fix.state, fix.me, {
+      type: 'add-to-meld',
+      meldId: opponentSet.id,
+      cards: [rc('K', 'spades')],
+    });
+
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/your own melds/i);
+  });
+
+  it('still allows extending my own sequence', () => {
+    const fix = makeFixture({
+      myHand: [rc('9', 'hearts'), rc('2', 'clubs')],
+      myMelds: [seqHearts10toK],
+    });
+    const r = applyTurnAction(fix.state, fix.me, {
+      type: 'add-to-meld',
+      meldId: seqHearts10toK.id,
+      cards: [rc('9', 'hearts')],
     });
     expect(r.ok).toBe(true);
-    if (r.ok) {
-      // Opponent's tableTotal unchanged.
-      expect(r.state.playerStates[fix.other].tableTotal).toBe(otherTableBefore);
-      // My tableTotal increased by 25 (the value I added).
-      expect(r.state.playerStates[fix.me].tableTotal).toBe(myTableBefore + 25);
-      // The opponent's meld now contains my A♥.
-      const owner = r.state.playerStates[fix.other].melds.find((m) => m.id === opponentMeld.id);
-      expect(owner?.cards.length).toBe(5);
-    }
+  });
+
+  it('still allows extending my own set', () => {
+    const fix = makeFixture({
+      myHand: [rc('K', 'spades'), rc('2', 'clubs')],
+      myMelds: [setKings3],
+    });
+    const r = applyTurnAction(fix.state, fix.me, {
+      type: 'add-to-meld',
+      meldId: setKings3.id,
+      cards: [rc('K', 'spades')],
+    });
+    expect(r.ok).toBe(true);
   });
 });
