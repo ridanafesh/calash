@@ -30,6 +30,21 @@ function deterministicRound(
   return initRound({ playerIds, roundNumber: 1, dealerIndex, deck });
 }
 
+/**
+ * Draw from deck + keep the drawn card in one helper. After the
+ * pending-drawn-decision phase was added, most existing tests want the
+ * old "draw → land in holding with the new card in hand" flow. This
+ * helper restores that for tests that aren't specifically about the
+ * keep/discard decision.
+ */
+function drawAndKeep(state: RoundState, playerId: string): RoundState {
+  const r1 = applyTurnAction(state, playerId, { type: 'draw-from-deck' });
+  if (!r1.ok) throw new Error(`drawAndKeep: draw failed — ${r1.error}`);
+  const r2 = applyTurnAction(r1.state, playerId, { type: 'keep-drawn-card' });
+  if (!r2.ok) throw new Error(`drawAndKeep: keep failed — ${r2.error}`);
+  return r2.state;
+}
+
 beforeEach(() => { idCounter = 0; });
 
 // ─── nextDealerIndex ─────────────────────────────────────────────────────────
@@ -182,26 +197,29 @@ describe('applyTurnAction — basic guards', () => {
 // ─── applyTurnAction — draw from deck ────────────────────────────────────────
 
 describe('applyTurnAction — draw-from-deck', () => {
-  it("moves top card from hiddenDeck to the current player's hand", () => {
+  it("removes the top card from hiddenDeck and stores it in pendingDrawnCard (NOT in hand)", () => {
+    // Per the spec: drawing now puts the card in a pending area until the
+    // player decides Keep vs Discard. The hand is unchanged at this point.
     const state = deterministicRound(['p1', 'p2']);
     const player = state.currentTurnPlayerId;
     const topCard = state.hiddenDeck[state.hiddenDeck.length - 1];
-    const before = state.playerStates[player].hand.length;
+    const handBefore = state.playerStates[player].hand.length;
 
     const result = applyTurnAction(state, player, { type: 'draw-from-deck' });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    expect(result.state.playerStates[player].hand).toHaveLength(before + 1);
     expect(result.state.hiddenDeck).toHaveLength(state.hiddenDeck.length - 1);
-    expect(result.state.playerStates[player].hand).toContainEqual(topCard);
+    expect(result.state.pendingDrawnCard).toEqual(topCard);
+    // Hand is UNCHANGED until the player chooses Keep.
+    expect(result.state.playerStates[player].hand).toHaveLength(handBefore);
   });
 
-  it('transitions turnPhase to holding', () => {
+  it('transitions turnPhase to pending-drawn-decision', () => {
     const state = deterministicRound(['p1', 'p2']);
     const result = applyTurnAction(state, state.currentTurnPlayerId, { type: 'draw-from-deck' });
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.state.turnPhase).toBe('holding');
+    if (result.ok) expect(result.state.turnPhase).toBe('pending-drawn-decision');
   });
 
   it('rejects draw when already holding (wrong phase)', () => {
@@ -219,12 +237,10 @@ describe('applyTurnAction — discard', () => {
   it('puts the discarded card on the discard pile', () => {
     const state = deterministicRound(['p1', 'p2']);
     const player = state.currentTurnPlayerId;
+    const stateAfterDraw = drawAndKeep(state, player);
 
-    const afterDraw = applyTurnAction(state, player, { type: 'draw-from-deck' });
-    if (!afterDraw.ok) return;
-
-    const handCard = afterDraw.state.playerStates[player].hand[0];
-    const afterDiscard = applyTurnAction(afterDraw.state, player, { type: 'discard', card: handCard });
+    const handCard = stateAfterDraw.playerStates[player].hand[0];
+    const afterDiscard = applyTurnAction(stateAfterDraw, player, { type: 'discard', card: handCard });
     expect(afterDiscard.ok).toBe(true);
     if (!afterDiscard.ok) return;
 
@@ -234,12 +250,10 @@ describe('applyTurnAction — discard', () => {
   it('removes the discarded card from hand', () => {
     const state = deterministicRound(['p1', 'p2']);
     const player = state.currentTurnPlayerId;
+    const stateAfterDraw = drawAndKeep(state, player);
 
-    const afterDraw = applyTurnAction(state, player, { type: 'draw-from-deck' });
-    if (!afterDraw.ok) return;
-
-    const handCard = afterDraw.state.playerStates[player].hand[0];
-    const afterDiscard = applyTurnAction(afterDraw.state, player, { type: 'discard', card: handCard });
+    const handCard = stateAfterDraw.playerStates[player].hand[0];
+    const afterDiscard = applyTurnAction(stateAfterDraw, player, { type: 'discard', card: handCard });
     if (!afterDiscard.ok) return;
 
     const newHand = afterDiscard.state.playerStates[player].hand;
@@ -250,12 +264,10 @@ describe('applyTurnAction — discard', () => {
     const state = deterministicRound(['p1', 'p2']);
     const player = state.currentTurnPlayerId;
     const nextPlayer = state.playerOrder[1];
+    const stateAfterDraw = drawAndKeep(state, player);
 
-    const afterDraw = applyTurnAction(state, player, { type: 'draw-from-deck' });
-    if (!afterDraw.ok) return;
-
-    const handCard = afterDraw.state.playerStates[player].hand[0];
-    const afterDiscard = applyTurnAction(afterDraw.state, player, { type: 'discard', card: handCard });
+    const handCard = stateAfterDraw.playerStates[player].hand[0];
+    const afterDiscard = applyTurnAction(stateAfterDraw, player, { type: 'discard', card: handCard });
     if (!afterDiscard.ok) return;
 
     expect(afterDiscard.state.currentTurnPlayerId).toBe(nextPlayer);
@@ -265,22 +277,13 @@ describe('applyTurnAction — discard', () => {
   it('rejects discarding a card not in hand', () => {
     const state = deterministicRound(['p1', 'p2']);
     const player = state.currentTurnPlayerId;
+    const stateAfterDraw = drawAndKeep(state, player);
 
-    const afterDraw = applyTurnAction(state, player, { type: 'draw-from-deck' });
-    if (!afterDraw.ok) return;
-
-    const notInHand = rc('A', 'hearts', 1); // unlikely to be in hand from seeded deck
-    // Use a card we know is definitely not in hand by choosing deck1 which may not be dealt
-    const result = applyTurnAction(afterDraw.state, player, {
-      type: 'discard',
-      card: { rank: 'JOKER', suit: null, isJoker: true, jokerIndex: 1 } as JokerCard,
-    });
-    // If joker happens to be in hand this test might fail; use a more targeted approach:
-    const hand = afterDraw.state.playerStates[player].hand;
+    const hand = stateAfterDraw.playerStates[player].hand;
     const cardNotInHand = { rank: '2' as const, suit: 'hearts' as const, isJoker: false as const, deckIndex: 0 as const };
     const isInHand = hand.some((c) => !c.isJoker && (c as RegularCard).rank === '2' && (c as RegularCard).suit === 'hearts' && (c as RegularCard).deckIndex === 0);
     if (!isInHand) {
-      const r = applyTurnAction(afterDraw.state, player, { type: 'discard', card: cardNotInHand });
+      const r = applyTurnAction(stateAfterDraw, player, { type: 'discard', card: cardNotInHand });
       expect(r.ok).toBe(false);
     }
   });
@@ -294,9 +297,9 @@ describe('applyTurnAction — go-down', () => {
     const state = deterministicRound(['p1', 'p2']);
     const player = state.currentTurnPlayerId;
 
-    // Draw first
-    const afterDraw = applyTurnAction(state, player, { type: 'draw-from-deck' });
-    if (!afterDraw.ok) return;
+    // Draw + keep so we land in 'holding' (the engine now requires an
+    // explicit Keep/Discard between draw and other actions).
+    const stateAfterDraw = drawAndKeep(state, player);
 
     // Build a guaranteed valid go-down by using 3 Aces (75pts)
     // We need to inject these cards into the player's hand
@@ -304,12 +307,12 @@ describe('applyTurnAction — go-down', () => {
     const aceD = rc('A', 'diamonds', 0);
     const aceC = rc('A', 'clubs', 0);
     const stateWithAces: RoundState = {
-      ...afterDraw.state,
+      ...stateAfterDraw,
       playerStates: {
-        ...afterDraw.state.playerStates,
+        ...stateAfterDraw.playerStates,
         [player]: {
-          ...afterDraw.state.playerStates[player],
-          hand: [aceH, aceD, aceC, ...afterDraw.state.playerStates[player].hand],
+          ...stateAfterDraw.playerStates[player],
+          hand: [aceH, aceD, aceC, ...stateAfterDraw.playerStates[player].hand],
         },
       },
     };
@@ -346,16 +349,15 @@ describe('applyTurnAction — add-to-meld', () => {
     const aceD = rc('A', 'diamonds', 0);
     const aceC = rc('A', 'clubs', 0);
 
-    // p2's turn: draw then go-down
-    const afterDraw1 = applyTurnAction(state, firstPlayer, { type: 'draw-from-deck' });
-    if (!afterDraw1.ok) return;
+    // p2's turn: draw + keep, then go-down
+    const stateAfterDraw1 = drawAndKeep(state, firstPlayer);
 
     const stateWith3Aces: RoundState = {
-      ...afterDraw1.state,
+      ...stateAfterDraw1,
       playerStates: {
-        ...afterDraw1.state.playerStates,
+        ...stateAfterDraw1.playerStates,
         [firstPlayer]: {
-          ...afterDraw1.state.playerStates[firstPlayer],
+          ...stateAfterDraw1.playerStates[firstPlayer],
           hand: [aceH, aceD, aceC, rc('2', 'clubs'), rc('3', 'clubs')],
         },
       },
@@ -389,14 +391,13 @@ describe('applyTurnAction — add-to-meld', () => {
       },
     };
 
-    // p1 draws
-    const afterDraw2 = applyTurnAction(stateP1Turn, secondPlayer, { type: 'draw-from-deck' });
-    if (!afterDraw2.ok) return;
+    // p1 draws + keeps
+    const stateAfterDraw2 = drawAndKeep(stateP1Turn, secondPlayer);
 
     // p1 adds the 4th Ace to p2's meld
-    const p1BeforeAdd = afterDraw2.state.playerStates[secondPlayer].tableTotal;
+    const p1BeforeAdd = stateAfterDraw2.playerStates[secondPlayer].tableTotal;
     const result = applyTurnAction(
-      afterDraw2.state,
+      stateAfterDraw2,
       secondPlayer,
       { type: 'add-to-meld', meldId, cards: [aceS] },
     );
@@ -408,7 +409,7 @@ describe('applyTurnAction — add-to-meld', () => {
     expect(p1After).toBe(p1BeforeAdd + 25);
 
     // p2's tableTotal should NOT change (they own the meld but didn't add the card)
-    const p2Before = afterDraw2.state.playerStates[firstPlayer].tableTotal;
+    const p2Before = stateAfterDraw2.playerStates[firstPlayer].tableTotal;
     const p2After = result.state.playerStates[firstPlayer].tableTotal;
     expect(p2After).toBe(p2Before);
   });
@@ -435,11 +436,10 @@ describe('applyTurnAction — round ends when hand is emptied', () => {
       },
     };
 
-    const afterDraw = applyTurnAction(stateOneCard, player, { type: 'draw-from-deck' });
-    if (!afterDraw.ok) return;
+    const stateAfterDraw = drawAndKeep(stateOneCard, player);
 
-    // Discard singleCard — player still has 1 card left
-    const afterDiscard1 = applyTurnAction(afterDraw.state, player, { type: 'discard', card: singleCard });
+    // Discard singleCard — player still has 1 card left from the draw
+    const afterDiscard1 = applyTurnAction(stateAfterDraw, player, { type: 'discard', card: singleCard });
     if (!afterDiscard1.ok || afterDiscard1.roundResult) {
       // Round may not have ended yet; let's set up a scenario with exactly 1 card remaining
       return;
@@ -447,12 +447,12 @@ describe('applyTurnAction — round ends when hand is emptied', () => {
 
     // A more direct test: give player exactly 1 card and no draw needed
     const stateLastCard: RoundState = {
-      ...afterDraw.state,
+      ...stateAfterDraw,
       turnPhase: 'holding',
       playerStates: {
-        ...afterDraw.state.playerStates,
+        ...stateAfterDraw.playerStates,
         [player]: {
-          ...afterDraw.state.playerStates[player],
+          ...stateAfterDraw.playerStates[player],
           hand: [singleCard],
           hasGoneDown: true,
         },

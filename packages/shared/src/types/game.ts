@@ -97,6 +97,7 @@ export type RoundPhase =
  */
 export type TurnPhase =
   | 'awaiting-draw-or-take'
+  | 'pending-drawn-decision' // drew from deck, waiting on keep-vs-discard
   | 'holding'
   | 'complete';
 

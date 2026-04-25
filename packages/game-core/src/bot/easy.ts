@@ -61,6 +61,25 @@ export function chooseEasyAction(ctx: BotContext, opts: ChooseEasyOptions = {}):
     return chooseDrawAction(state, hand);
   }
 
+  // ── Pending drawn-card decision ────────────────────────────────────────────
+  // After drawing from the deck the engine now requires a Keep/Discard
+  // decision before the bot can do anything else. Easy strategy: keep the
+  // card if it would be more useful in hand than the worst card already in
+  // hand; otherwise discard it directly. Cheap, decisive — avoids a huge
+  // search tree at this point in the turn.
+  if (state.turnPhase === 'pending-drawn-decision') {
+    const drawn = state.pendingDrawnCard;
+    if (!drawn) {
+      // Defensive: should not happen. Fall back to keep (safer than discard,
+      // since keep can't lose information).
+      return { type: 'keep-drawn-card' };
+    }
+    if (shouldKeepDrawnCard(drawn, hand)) {
+      return { type: 'keep-drawn-card' };
+    }
+    return { type: 'discard-drawn-card' };
+  }
+
   // ── Holding phase ──────────────────────────────────────────────────────────
   // Try, in order:
   //   1. If not down yet and threshold reachable → go-down with best meld set.
@@ -306,6 +325,20 @@ function keepScore(card: Card, hand: readonly Card[]): number {
   score += sameSuitNeighbors;
 
   return score;
+}
+
+/**
+ * Decide whether the bot should keep the freshly-drawn card or discard it
+ * straight away. We keep when:
+ *   - the card is a joker (always keep),
+ *   - the card has any meld-partner in hand (keepScore > 0), or
+ *   - the bot's hand is small (< 4 cards left — almost-finished, hold tight).
+ * Otherwise we discard high-value dead-weight cards directly.
+ */
+function shouldKeepDrawnCard(drawn: Card, hand: readonly Card[]): boolean {
+  if (drawn.isJoker) return true;
+  if (hand.length < 4) return true;
+  return keepScore(drawn, hand) > 0;
 }
 
 // ─── Meld enumeration ───────────────────────────────────────────────────────

@@ -710,6 +710,65 @@ a:focus-visible {
   border-top-color: #fff;
 }
 
+/* ── Drawn-card preview (Keep / Discard) ───────────────────────────────── */
+
+.drawn-card-preview {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 6px 12px;
+  padding: 10px 12px;
+  background: linear-gradient(
+    135deg,
+    rgba(99, 102, 241, 0.12),
+    rgba(34, 197, 94, 0.06)
+  );
+  border: 1.5px solid var(--accent);
+  border-radius: 10px;
+  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.08);
+}
+
+.drawn-card-preview--watch {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: var(--border);
+  box-shadow: none;
+}
+
+.drawn-card-preview-card {
+  flex-shrink: 0;
+}
+
+.drawn-card-preview-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+
+.drawn-card-preview-title {
+  font-weight: 700;
+  font-size: 0.92rem;
+  color: var(--text-primary);
+}
+
+.drawn-card-preview-help {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+@media (max-width: 600px) {
+  .drawn-card-preview {
+    flex-direction: column;
+    align-items: stretch;
+    text-align: left;
+  }
+  .drawn-card-preview-card {
+    align-self: center;
+  }
+}
+
 /* ── Discard-pile inspector modal ────────────────────────────────────────── */
 
 .discard-inspector {

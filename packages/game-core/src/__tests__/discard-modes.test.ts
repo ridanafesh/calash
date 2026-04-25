@@ -28,6 +28,17 @@ import { applyTurnAction } from '../engine.js';
 const rc = (rank: RegularCard['rank'], suit: RegularCard['suit'], deckIndex: 0 | 1 = 0): RegularCard =>
   ({ rank, suit, isJoker: false, deckIndex });
 
+/** Draw-from-deck + keep-drawn-card in one helper. The pending-draw
+ *  decision was added later; tests that just want to "draw a card and
+ *  end up in holding" call this. */
+function drawAndKeep(state: RoundState, playerId: string): RoundState {
+  const r1 = applyTurnAction(state, playerId, { type: 'draw-from-deck' });
+  if (!r1.ok) throw new Error(`drawAndKeep draw failed: ${r1.error}`);
+  const r2 = applyTurnAction(r1.state, playerId, { type: 'keep-drawn-card' });
+  if (!r2.ok) throw new Error(`drawAndKeep keep failed: ${r2.error}`);
+  return r2.state;
+}
+
 interface Fixture {
   state: RoundState;
   me: string;
@@ -243,16 +254,19 @@ describe('Discard pickup — spec scenarios', () => {
     if (!tryAdd.ok) expect(tryAdd.error).toMatch(/not.*me'?s|other'?s turn/i);
   });
 
-  it('draw-from-deck DOES leave the player in holding (must discard) — verifies path separation', () => {
-    // Critical separation: draw-from-deck still requires a discard to end the
-    // turn; only take-from-discard is self-terminating.
+  it('draw-from-deck does NOT advance the turn — only the take-from-discard path is self-terminating', () => {
+    // Critical separation: take-from-discard ends the turn immediately;
+    // draw-from-deck leaves the player on their turn (now in
+    // pending-drawn-decision phase, then 'holding' after Keep, then
+    // discard ends the turn). Either way, draw never auto-advances.
     const fix = makeDrawPhaseFixture({ myHand: [rc('5', 'clubs')], pile: [rc('K', 'hearts')] });
     const r = applyTurnAction(fix.state, fix.me, { type: 'draw-from-deck' });
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.state.currentTurnPlayerId).toBe(fix.me); // still my turn
-      expect(r.state.turnPhase).toBe('holding');
+      expect(r.state.currentTurnPlayerId).toBe(fix.me);
+      expect(r.state.turnPhase).toBe('pending-drawn-decision');
       expect(r.state.didTakeFromDiscardThisTurn).toBe(false);
+      expect(r.state.pendingDrawnCard).toBeDefined();
     }
   });
 
@@ -271,12 +285,10 @@ describe('Discard pickup — spec scenarios', () => {
     if (!after1.ok) return;
     expect(after1.state.currentTurnPlayerId).toBe(fix.other);
 
-    // Turn 2 (other): draw + discard to end their turn so it comes back to me.
-    const otherDraw = applyTurnAction(after1.state, fix.other, { type: 'draw-from-deck' });
-    expect(otherDraw.ok).toBe(true);
-    if (!otherDraw.ok) return;
-    const otherHand = otherDraw.state.playerStates[fix.other].hand;
-    const otherDiscard = applyTurnAction(otherDraw.state, fix.other, {
+    // Turn 2 (other): draw+keep, then discard to pass turn back.
+    const otherStateAfterDraw = drawAndKeep(after1.state, fix.other);
+    const otherHand = otherStateAfterDraw.playerStates[fix.other].hand;
+    const otherDiscard = applyTurnAction(otherStateAfterDraw, fix.other, {
       type: 'discard',
       card: otherHand[0],
     });
@@ -284,17 +296,15 @@ describe('Discard pickup — spec scenarios', () => {
     if (!otherDiscard.ok) return;
     expect(otherDiscard.state.currentTurnPlayerId).toBe(fix.me);
 
-    // Turn 3 (me again): draw, then go down. didTakeFromDiscardThisTurn was
-    // reset on the previous advanceTurn so the go-down restriction is gone.
-    const draw = applyTurnAction(otherDiscard.state, fix.me, { type: 'draw-from-deck' });
-    expect(draw.ok).toBe(true);
-    if (!draw.ok) return;
+    // Turn 3 (me again): draw+keep, then go down. didTakeFromDiscardThisTurn
+    // was reset on advanceTurn so the go-down restriction is gone.
+    const stateAfterMyDraw = drawAndKeep(otherDiscard.state, fix.me);
 
-    const myHand = draw.state.playerStates[fix.me].hand;
+    const myHand = stateAfterMyDraw.playerStates[fix.me].hand;
     const aces = myHand.filter((c) => !c.isJoker && c.rank === 'A');
     expect(aces.length).toBeGreaterThanOrEqual(3);
 
-    const goDown = applyTurnAction(draw.state, fix.me, {
+    const goDown = applyTurnAction(stateAfterMyDraw, fix.me, {
       type: 'go-down',
       melds: [{ type: 'set', cards: aces.slice(0, 3) }],
     });
@@ -322,20 +332,18 @@ describe('Discard pickup — spec scenarios', () => {
     if (!taken.ok) return;
 
     // Other player draws + discards to pass turn back.
-    const otherDraw = applyTurnAction(taken.state, fix.other, { type: 'draw-from-deck' });
-    if (!otherDraw.ok) return;
-    const otherHand = otherDraw.state.playerStates[fix.other].hand;
-    const otherDiscard = applyTurnAction(otherDraw.state, fix.other, {
+    const otherStateAfterDraw = drawAndKeep(taken.state, fix.other);
+    const otherHand = otherStateAfterDraw.playerStates[fix.other].hand;
+    const otherDiscard = applyTurnAction(otherStateAfterDraw, fix.other, {
       type: 'discard',
       card: otherHand[0],
     });
     expect(otherDiscard.ok).toBe(true);
     if (!otherDiscard.ok) return;
 
-    // My turn again: draw + extend my meld with 4♣.
-    const draw = applyTurnAction(otherDiscard.state, fix.me, { type: 'draw-from-deck' });
-    if (!draw.ok) return;
-    const extend = applyTurnAction(draw.state, fix.me, {
+    // My turn again: draw+keep, then extend my meld with 4♣.
+    const stateAfterMyDraw = drawAndKeep(otherDiscard.state, fix.me);
+    const extend = applyTurnAction(stateAfterMyDraw, fix.me, {
       type: 'add-to-meld',
       meldId: myMeld.id,
       cards: [rc('4', 'clubs')],

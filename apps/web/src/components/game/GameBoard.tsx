@@ -193,6 +193,18 @@ export function GameBoard() {
     submitAction({ type: 'take-from-discard', count });
   }
 
+  function keepDrawnCard() {
+    if (submitting) return;
+    clearError();
+    submitAction({ type: 'keep-drawn-card' });
+  }
+
+  function discardDrawnCardDirect() {
+    if (submitting) return;
+    clearError();
+    submitAction({ type: 'discard-drawn-card' });
+  }
+
   function doTakeAll(returnCard: Card) {
     submitAction({ type: 'take-from-discard', count: discardPile.length, returnCardFromHand: returnCard });
     setMode('idle');
@@ -263,6 +275,12 @@ export function GameBoard() {
   const hasGoneDown = myState?.hasGoneDown ?? false;
   const canGoDown = canHold && !hasGoneDown && !gameState.didTakeFromDiscardThisTurn;
   const canAddMelds = canHold && hasGoneDown;
+
+  // Pending draw decision — between draw-from-deck and the Keep/Discard
+  // choice. While in this phase the engine rejects every other action, so
+  // the UI hides the rest of the action bar and shows the preview instead.
+  const isPendingDecision = isMyTurn && gameState.turnPhase === 'pending-drawn-decision';
+  const pendingDrawnCard = gameState.pendingDrawnCard;
 
   return (
     <div className="game-board">
@@ -672,8 +690,65 @@ export function GameBoard() {
         </div>
       )}
 
+      {/* ── Drawn-card preview (Keep / Discard) ── */}
+      {isPendingDecision && pendingDrawnCard && (
+        <div className="drawn-card-preview" role="region" aria-label="Drawn card decision">
+          <div className="drawn-card-preview-card">
+            <CardView card={pendingDrawnCard} size="md" />
+          </div>
+          <div className="drawn-card-preview-body">
+            <div className="drawn-card-preview-title">You drew this card</div>
+            <p className="drawn-card-preview-help">
+              Keep it (then discard one card from hand to end your turn) or
+              discard it directly to the pile.
+            </p>
+            {roomError && (
+              <div className="error-banner" role="alert" style={{ margin: 0 }}>
+                {roomError.message}
+                <button
+                  onClick={clearError}
+                  style={{ marginLeft: 8, background: 'none', border: 'none', cursor: 'pointer', color: 'inherit' }}
+                  aria-label="Dismiss error"
+                >✕</button>
+              </div>
+            )}
+            <div className="row" style={{ gap: 8 }}>
+              <button
+                className="btn btn-success"
+                disabled={submitting}
+                onClick={keepDrawnCard}
+              >
+                ✓ Keep
+              </button>
+              <button
+                className="btn btn-danger"
+                disabled={submitting}
+                onClick={discardDrawnCardDirect}
+                title="Send the drawn card straight to the discard pile and end your turn"
+              >
+                ✕ Discard
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Pending-decision view for opponents — informational only, no actions. */}
+      {!isPendingDecision && gameState.turnPhase === 'pending-drawn-decision' && pendingDrawnCard && (
+        <div className="drawn-card-preview drawn-card-preview--watch" role="status">
+          <div className="drawn-card-preview-card">
+            <CardView card={pendingDrawnCard} size="sm" />
+          </div>
+          <div className="drawn-card-preview-body">
+            <div className="drawn-card-preview-title">
+              {nameOf(gameState.currentTurnPlayerId)} drew a card and is deciding…
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Idle-mode error banner (e.g. invalid draw or discard rejected) */}
-      {mode === 'idle' && roomError && (
+      {mode === 'idle' && !isPendingDecision && roomError && (
         <div className="error-banner" role="alert" style={{ margin: '0 12px 4px' }}>
           {roomError.message}
           <button

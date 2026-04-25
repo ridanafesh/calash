@@ -32,9 +32,33 @@ export interface TurnContext {
  * remains isolated and testable independently.
  */
 export function validateTurnAction(action: TurnAction, ctx: TurnContext): ValidationResult {
+  // While a drawn-card decision is pending, the only legal next moves are
+  // keep-drawn-card and discard-drawn-card. Block everything else up front
+  // so blocking logic isn't duplicated across each branch.
+  if (
+    ctx.turnPhase === 'pending-drawn-decision' &&
+    action.type !== 'keep-drawn-card' &&
+    action.type !== 'discard-drawn-card'
+  ) {
+    return {
+      valid: false,
+      reason: 'You drew a card — choose Keep or Discard before doing anything else',
+    };
+  }
+
   switch (action.type) {
     case 'draw-from-deck':
       return validateDraw(ctx);
+
+    case 'keep-drawn-card':
+    case 'discard-drawn-card':
+      if (ctx.turnPhase !== 'pending-drawn-decision') {
+        return {
+          valid: false,
+          reason: `Cannot ${action.type} during phase '${ctx.turnPhase}' — no drawn card pending`,
+        };
+      }
+      return { valid: true };
 
     case 'take-from-discard': {
       if (ctx.turnPhase !== 'awaiting-draw-or-take') {

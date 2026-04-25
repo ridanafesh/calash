@@ -106,6 +106,32 @@ export interface DiscardAction {
   readonly card: Card;
 }
 
+// ─── Pending-drawn-card decision actions ────────────────────────────────────
+
+/**
+ * Keep the card just drawn from the hidden deck.
+ * Valid only when turnPhase === 'pending-drawn-decision'.
+ *
+ * The pending card is moved into the player's hand and turnPhase advances
+ * to 'holding'. The player must then choose a card to discard (which may
+ * or may not be the just-drawn card) to end the turn.
+ */
+export interface KeepDrawnCardAction {
+  readonly type: 'keep-drawn-card';
+}
+
+/**
+ * Discard the card just drawn from the hidden deck directly to the pile,
+ * ending the turn.
+ * Valid only when turnPhase === 'pending-drawn-decision'.
+ *
+ * The pending card never enters the player's hand. It is placed on top of
+ * the discard pile and turn passes to the next player.
+ */
+export interface DiscardDrawnCardAction {
+  readonly type: 'discard-drawn-card';
+}
+
 // ─── Union ───────────────────────────────────────────────────────────────────
 
 export type TurnAction =
@@ -114,6 +140,8 @@ export type TurnAction =
   | GoDownAction
   | AddToMeldAction
   | AddNewMeldAction
-  | DiscardAction;
+  | DiscardAction
+  | KeepDrawnCardAction
+  | DiscardDrawnCardAction;
 
 export type TurnActionType = TurnAction['type'];

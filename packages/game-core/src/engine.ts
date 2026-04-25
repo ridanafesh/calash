@@ -208,12 +208,14 @@ function dispatch(
   generateId: () => string,
 ): ApplyResult {
   switch (action.type) {
-    case 'draw-from-deck':   return applyDraw(state, playerId);
-    case 'take-from-discard': return applyTakeDiscard(state, playerId, action);
-    case 'go-down':          return applyGoDown(state, playerId, action, generateId);
-    case 'add-to-meld':      return applyAddToMeld(state, playerId, action);
-    case 'add-new-meld':     return applyAddNewMeld(state, playerId, action, generateId);
-    case 'discard':          return applyDiscard(state, playerId, action);
+    case 'draw-from-deck':       return applyDraw(state, playerId);
+    case 'take-from-discard':    return applyTakeDiscard(state, playerId, action);
+    case 'go-down':              return applyGoDown(state, playerId, action, generateId);
+    case 'add-to-meld':          return applyAddToMeld(state, playerId, action);
+    case 'add-new-meld':         return applyAddNewMeld(state, playerId, action, generateId);
+    case 'discard':              return applyDiscard(state, playerId, action);
+    case 'keep-drawn-card':      return applyKeepDrawnCard(state, playerId);
+    case 'discard-drawn-card':   return applyDiscardDrawnCard(state, playerId);
   }
 }
 
@@ -224,23 +226,68 @@ function defaultId(): string {
 // ─── draw-from-deck ───────────────────────────────────────────────────────────
 
 function applyDraw(state: RoundState, playerId: string): ApplyResult {
-  // Top of deck = last element.
+  // Top of deck = last element. The drawn card does NOT go straight into
+  // the player's hand — it sits in pendingDrawnCard until the player picks
+  // Keep (→ hand, must then discard one) or Discard (→ pile, turn ends).
+  // This separation gives the UI a clean preview area and lets the engine
+  // block all other actions while the decision is pending.
+  void playerId;
   const drawnCard = state.hiddenDeck[state.hiddenDeck.length - 1];
   const newHiddenDeck = state.hiddenDeck.slice(0, -1);
-  const ps = state.playerStates[playerId];
 
   return {
     ok: true,
     state: {
       ...state,
       hiddenDeck: newHiddenDeck,
+      turnPhase: 'pending-drawn-decision',
+      pendingDrawnCard: drawnCard,
+    },
+  };
+}
+
+// ─── keep-drawn-card / discard-drawn-card ────────────────────────────────────
+
+function applyKeepDrawnCard(state: RoundState, playerId: string): ApplyResult {
+  const drawn = state.pendingDrawnCard;
+  if (!drawn) return { ok: false, error: 'No drawn card pending' };
+
+  const ps = state.playerStates[playerId];
+  return {
+    ok: true,
+    state: {
+      ...state,
       turnPhase: 'holding',
+      pendingDrawnCard: undefined,
       playerStates: {
         ...state.playerStates,
-        [playerId]: { ...ps, hand: [...ps.hand, drawnCard] },
+        [playerId]: { ...ps, hand: [...ps.hand, drawn] },
       },
     },
   };
+}
+
+function applyDiscardDrawnCard(state: RoundState, playerId: string): ApplyResult {
+  const drawn = state.pendingDrawnCard;
+  if (!drawn) return { ok: false, error: 'No drawn card pending' };
+
+  // Push the drawn card straight to the discard pile. The card never
+  // entered the hand, so hand size is unchanged. Hand-empty round-end is
+  // therefore impossible from this action — skip that check.
+  let newState: RoundState = {
+    ...state,
+    discardPile: [...state.discardPile, drawn],
+    pendingDrawnCard: undefined,
+  };
+
+  newState = advanceTurn(newState);
+
+  if (isRoundOverByExhaustion(newState)) {
+    return finishRound(newState, 'deck-exhausted', null);
+  }
+
+  void playerId;
+  return { ok: true, state: newState };
 }
 
 // ─── take-from-discard ────────────────────────────────────────────────────────
@@ -476,6 +523,7 @@ function advanceTurn(state: RoundState): RoundState {
     currentTurnPlayerId: state.playerOrder[nextIdx],
     turnPhase: 'awaiting-draw-or-take',
     didTakeFromDiscardThisTurn: false,
+    pendingDrawnCard: undefined,
   };
 }
 
@@ -534,5 +582,6 @@ export function toRoundStateView(state: RoundState): RoundStateView {
     highestTableTotal: state.highestTableTotal,
     endReason: state.endReason,
     finisherPlayerId: state.finisherPlayerId,
+    pendingDrawnCard: state.pendingDrawnCard,
   };
 }

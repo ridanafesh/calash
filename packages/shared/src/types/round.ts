@@ -79,6 +79,15 @@ export interface RoundState {
 
   /** Set when the round ends because a player emptied their hand. */
   finisherPlayerId?: string;
+
+  /**
+   * The card the current player just drew from the hidden deck and has not
+   * yet decided to keep or discard. Set when turnPhase === 'pending-drawn-
+   * decision'; null otherwise. The card is NOT in any player's hand while
+   * pending — it lives only in this field. Visible to all clients via
+   * RoundStateView so opponents can see "Player X drew (and is deciding)".
+   */
+  pendingDrawnCard?: Card;
 }
 
 // ─── Client-safe view (no hidden deck contents) ──────────────────────────────
@@ -105,6 +114,8 @@ export interface RoundStateView {
   highestTableTotal: number;
   endReason?: RoundEndReason;
   finisherPlayerId?: string;
+  /** Mirror of RoundState.pendingDrawnCard — visible to all clients. */
+  pendingDrawnCard?: Card;
 }
 
 // ─── Round result (for scoring) ──────────────────────────────────────────────
