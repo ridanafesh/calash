@@ -789,22 +789,55 @@ export function GameBoard() {
           selectedPoints={sumCards(selectedCards)}
         />
         <div className="hand-scroll">
-          {displayedHand.map((card) => {
-            const inPend = isInPending(card);
-            return (
-              <CardView
-                key={cardId(card)}
-                card={card}
-                selected={isSelected(card) || inPend}
-                dimmed={inPend}
-                size="md"
-                onClick={() => {
-                  if (mode === 'take-all-return') doTakeAll(card);
-                  else toggleCard(card);
-                }}
-              />
-            );
-          })}
+          {(() => {
+            // Per-card overlap, computed once per render. The md card is 84px
+            // wide; we expose at least 28px of each card's left edge so the
+            // rank+suit corner indicator stays readable. The first card has
+            // no overlap; subsequent cards bleed leftward via negative margin.
+            //
+            // Density ramps with hand size:
+            //   ≤ 6 cards : 12px gap (open layout, plenty of breathing room)
+            //   7–10 cards: small overlap so the row doesn't span too wide
+            //   11+ cards : tighter overlap; horizontal scroll catches anything
+            //               that still doesn't fit the viewport
+            const n = displayedHand.length;
+            const cardWidth = 84; // matches CardView md width
+            // Negative number = overlap (cards bleed leftward); positive = gap.
+            const overlap =
+              n <= 6 ? 12
+              : n <= 10 ? -(cardWidth - 56) // ~28px of card visible
+              : n <= 14 ? -(cardWidth - 38) // ~46px overlap, ~38px visible
+              : -(cardWidth - 30);          // ~54px overlap, ~30px visible
+            return displayedHand.map((card, i) => {
+              const inPend = isInPending(card);
+              const sel = isSelected(card) || inPend;
+              return (
+                <div
+                  key={cardId(card)}
+                  className={`hand-card${sel ? ' is-selected' : ''}`}
+                  style={{
+                    // First card has no leftward bleed; rest overlap.
+                    marginLeft: i === 0 ? 0 : overlap,
+                    // Default z-index ramps left-to-right so a right-hand
+                    // card naturally sits on top of the one to its left.
+                    // CSS hover/selected boosts override.
+                    zIndex: i + 1,
+                  }}
+                >
+                  <CardView
+                    card={card}
+                    selected={sel}
+                    dimmed={inPend}
+                    size="md"
+                    onClick={() => {
+                      if (mode === 'take-all-return') doTakeAll(card);
+                      else toggleCard(card);
+                    }}
+                  />
+                </div>
+              );
+            });
+          })()}
           {hand.length === 0 && (
             <span style={{ color: 'rgba(255,255,255,0.18)', fontSize: '0.82rem', alignSelf: 'center' }}>
               No cards in hand

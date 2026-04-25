@@ -523,27 +523,69 @@ a:focus-visible {
   outline-offset: 2px;
 }
 
-/* ── Hand area: cards centered, wrap on small screens, scroll on overflow ── */
+/* ── Hand area: cards in a single overlapped row, horizontal scroll ──
+   Real-cards-in-hand feel: cards form a single row that overlap from
+   left to right, exposing only the top-left rank/suit corner of each
+   card except the rightmost one (which shows in full). The container
+   scrolls horizontally when the hand is wider than the viewport so
+   every card stays reachable. We do NOT fan/curve the cards — they
+   stay on a flat baseline.
+
+   Each card's overlap amount is set via inline marginLeft from JSX so
+   density can adapt to card count (more cards → tighter overlap,
+   fewer cards → more breathing room). The CSS handles the ramping
+   z-index via wrapper::nth-child default + a class boost on
+   hover/selected/pending to make sure the active card always reads on
+   top of its right-side neighbours. */
 
 .hand-scroll {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 8px 12px 8px;
-  flex: 1;
+  flex-wrap: nowrap;
   align-items: flex-end;
-  align-content: flex-end;
-  justify-content: center;
-  overflow-y: auto;
-  overflow-x: hidden;
+  /* Center horizontally when the hand fits; fall back to start when it
+     overflows so the leftmost cards aren't clipped by the centering.
+     `safe center` is the modern way to express that. Older browsers
+     ignore the `safe` keyword and stay at `center` — also acceptable
+     because horizontal scroll still surfaces the rest. */
+  justify-content: safe center;
+  gap: 0;
+  padding: 14px 16px 8px;
+  flex: 1;
+  overflow-x: auto;
+  overflow-y: hidden;
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+  /* Reserve enough vertical room for the -10px selected-lift + hover
+     translate without clipping. */
+  min-height: calc(118px + 18px);
+}
+
+/* Each direct child is the wrapper around one CardView. */
+.hand-scroll > .hand-card {
+  position: relative;
+  flex-shrink: 0;
+  /* Default z-index ramps left-to-right via inline style; hover/selected
+     boosts override. transition smooths the hover lift. */
+  transition: transform 0.12s ease-out, margin-top 0.12s ease-out;
+}
+
+/* Pop the hovered card up + over its neighbours so the player can read
+   it clearly. The lift is small so the row baseline doesn't jump. */
+.hand-scroll > .hand-card:hover {
+  z-index: 1000 !important;
+  transform: translateY(-6px);
+}
+
+/* Selected / pending cards already lift via the inline translateY(-10px)
+   on the inner CardView; we just need to ensure they sit above neighbours
+   so the lift is visible against later (rightward) overlapping cards. */
+.hand-scroll > .hand-card.is-selected {
+  z-index: 900;
 }
 
 @media (max-width: 600px) {
   .hand-scroll {
-    gap: 2px;
-    padding: 6px 8px 6px;
+    padding: 10px 10px 6px;
   }
   .hand-toolbar {
     padding: 4px 8px 0;
