@@ -679,23 +679,46 @@ export function GameBoard() {
             </div>
           )}
 
-          {pendingMelds.length > 0 && (
-            <div className="pending-melds">
-              {pendingMelds.map((pm, i) => (
-                <div key={i} className="pending-meld-item">
-                  <span style={{ fontSize: '0.7rem', color: 'var(--accent)', marginRight: 3 }}>{pm.type}</span>
-                  {pm.cards.map((c) => <CardView key={cardId(c)} card={c} size="xs" />)}
-                  <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginLeft: 3 }}>
-                    ({sumCards(pm.cards)})
-                  </span>
-                  <button
-                    className="btn-icon"
-                    style={{ fontSize: 11 }}
-                    disabled={submitting}
-                    onClick={() => setPendingMelds((p) => p.filter((_, j) => j !== i))}
-                  >✕</button>
-                </div>
-              ))}
+          {/* Selected Melds preview — only meaningful in go-down mode where
+              the player builds up a list of melds before submitting. In
+              add-new-meld mode there's no batching: one selection submits
+              one meld immediately, so we skip the section there. The list
+              container has its own scroll so a long pending-melds list
+              never pushes the panel controls — or the bottom-anchored hand
+              — off-screen. */}
+          {mode === 'go-down' && (
+            <div
+              className="col"
+              style={{ gap: 4, minHeight: 0, flex: '1 1 auto', overflow: 'hidden' }}
+            >
+              <span
+                style={{
+                  fontSize: '0.7rem',
+                  fontWeight: 600,
+                  color: 'rgba(255,255,255,0.55)',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.04em',
+                }}
+              >
+                Selected melds {pendingMelds.length > 0 && `(${pendingMelds.length})`}
+              </span>
+              <div className="pending-melds">
+                {pendingMelds.map((pm, i) => (
+                  <div key={i} className="pending-meld-item">
+                    <span style={{ fontSize: '0.7rem', color: 'var(--accent)', marginRight: 3 }}>{pm.type}</span>
+                    {pm.cards.map((c) => <CardView key={cardId(c)} card={c} size="xs" />)}
+                    <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginLeft: 3 }}>
+                      ({sumCards(pm.cards)})
+                    </span>
+                    <button
+                      className="btn-icon"
+                      style={{ fontSize: 11 }}
+                      disabled={submitting}
+                      onClick={() => setPendingMelds((p) => p.filter((_, j) => j !== i))}
+                    >✕</button>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 

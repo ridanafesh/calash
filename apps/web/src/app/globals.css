@@ -447,11 +447,24 @@ a:focus-visible {
   background: rgba(34,197,94,0.1);
 }
 
+/* Anchored at the bottom of the game board, ABOVE the action-bar but below
+   any go-down/preview panels. The hand reserves a guaranteed minimum height
+   (one md-card row + toolbar) and absorbs any leftover space — but it can
+   never be squeezed below the minimum, so the preview panels above can't
+   push the hand off-screen. The internal .hand-scroll absorbs overflow
+   when the hand is taller than its allotted slot. */
 .hand-area {
+  /* flex: 1 with a hard min-height — the hand grows to fill spare space
+     (when no panel is open) AND refuses to shrink below 168px when a panel
+     is open. The preview panel above caps itself with max-height + internal
+     scroll, so even a long pending-melds list can't starve the hand. */
   flex: 1;
+  min-height: 168px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  background: rgba(0, 0, 0, 0.18);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 /* ── Hand toolbar (sort/group controls) ─────────────────────────────────── */
@@ -554,20 +567,53 @@ a:focus-visible {
 
 /* ── Go-down builder ─────────────────────────────────────────────────────────── */
 
+/* The Selected-Melds / Go-Down preview panel.
+   Sits between .my-section and the bottom-anchored .hand-area. Capped with
+   a max-height + internal scroll so it can never grow tall enough to push
+   the hand off-screen; the .hand-area below still owns the flex-1 spare
+   space and stays anchored at the bottom regardless of how many melds the
+   player queues up here. */
 .go-down-panel {
-  background: rgba(0,0,0,0.4);
+  flex-shrink: 0;
+  max-height: 36vh;
+  background: rgba(0, 0, 0, 0.4);
   border-top: 1px solid var(--accent);
   padding: 10px 12px;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  flex-shrink: 0;
+  overflow: hidden;
 }
 
+/* Sub-section that holds the actual list of pending meld chips. Takes the
+   panel's flex space and owns the scroll, so the header (title + Cancel)
+   and footer (Submit + meld-type buttons) remain visible while the player
+   reviews a long list of pending melds. */
 .pending-melds {
+  flex: 1 1 auto;
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
+  overflow-y: auto;
+  align-content: flex-start;
+  padding: 6px 4px;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px dashed rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  min-height: 60px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+
+.pending-melds:empty::before {
+  content: 'Selected melds appear here. Pick cards from your hand below, then click + Sequence or + Set.';
+  color: rgba(255, 255, 255, 0.35);
+  font-size: 0.75rem;
+  font-style: italic;
+  align-self: center;
+  margin: auto;
+  padding: 0 12px;
+  text-align: center;
 }
 
 .pending-meld-item {
