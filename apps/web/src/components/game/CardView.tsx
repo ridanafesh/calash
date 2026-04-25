@@ -35,12 +35,15 @@ interface CardViewProps {
   size?: 'xs' | 'sm' | 'md';
 }
 
-// Card sizes — all dimensions ~20% larger than the original 36/46/58 widths.
-// Scaling lives in this single table so every CardView/CardBack stays in sync.
+// Card sizes — bumped a further +20% over the previous 43/55/70 widths,
+// keeping the same ~7:5 aspect ratio.  All scaling lives in this single
+// table so every CardView/CardBack stays in sync; layout boxes that pin
+// a card-shaped placeholder (e.g. the empty-discard slot) read from the
+// same numbers.
 const SIZES = {
-  xs: { width: 43, height: 60, fontSize: 12, suitSize: 14 },
-  sm: { width: 55, height: 77, fontSize: 14, suitSize: 18 },
-  md: { width: 70, height: 98, fontSize: 17, suitSize: 22 },
+  xs: { width: 52, height: 72, fontSize: 14, suitSize: 17 },
+  sm: { width: 66, height: 92, fontSize: 17, suitSize: 22 },
+  md: { width: 84, height: 118, fontSize: 20, suitSize: 26 },
 };
 
 export function CardView({ card, selected, dimmed, onClick, size = 'md' }: CardViewProps) {

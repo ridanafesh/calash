@@ -537,7 +537,7 @@ export function GameBoard() {
             {topDiscard ? (
               <CardView card={topDiscard} size="md" />
             ) : (
-              <div style={{ width: 70, height: 98, borderRadius: 5, border: '1.5px dashed rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div style={{ width: 84, height: 118, borderRadius: 5, border: '1.5px dashed rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <span style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.25)' }}>empty</span>
               </div>
             )}

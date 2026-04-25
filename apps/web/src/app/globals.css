@@ -374,14 +374,16 @@ a:focus-visible {
   overflow-x: auto;
   border-bottom: 1px solid rgba(255,255,255,0.06);
   flex-shrink: 0;
-  min-height: 110px;
+  /* Sized for an xs-card row (~72px) below name + badges + score line. */
+  min-height: 130px;
 }
 
 .opponent-zone {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  min-width: 160px;
+  /* Wide enough for a 3-card xs meld row (~3×52 + gaps) without wrap. */
+  min-width: 180px;
   background: rgba(255,255,255,0.04);
   border: 1px solid rgba(255,255,255,0.08);
   border-radius: 10px;
@@ -422,7 +424,9 @@ a:focus-visible {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
-  min-height: 52px;
+  /* Sized for a sm-card row (~92px) so the empty-state placeholder
+     reserves the same vertical space as a populated row. */
+  min-height: 96px;
 }
 
 .meld-group {
