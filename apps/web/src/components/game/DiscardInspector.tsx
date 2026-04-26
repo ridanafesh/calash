@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Card, RegularCard, Suit } from '@calash/shared';
 import { RANK_ORDER } from '@calash/shared';
+import { useT } from '@/lib/i18n';
 import { CardView, cardEquals, cardId } from './CardView';
 
 interface DiscardInspectorProps {
@@ -63,6 +64,7 @@ export function DiscardInspector({
   onStartTakeAllReturn,
   onClose,
 }: DiscardInspectorProps) {
+  const t = useT();
   const ref = useRef<HTMLDivElement | null>(null);
   const [mode, setMode] = useState<ViewMode>('grouped');
   // When set, the player is in "leave-one selection" mode and this is the
@@ -132,19 +134,18 @@ export function DiscardInspector({
         {/* Header */}
         <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <h2 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0 }}>
-            Discard pile ({pile.length})
+            {t('discard.title', { n: pile.length })}
           </h2>
           <div className="row" style={{ gap: 4 }}>
-            <div className="hand-toolbar-actions" role="radiogroup" aria-label="View mode">
+            <div className="hand-toolbar-actions" role="radiogroup">
               <button
                 type="button"
                 role="radio"
                 aria-checked={mode === 'grouped'}
                 className={`hand-toolbar-btn ${mode === 'grouped' ? 'is-active' : ''}`}
                 onClick={() => setMode('grouped')}
-                title="Group cards by suit"
               >
-                Grouped
+                {t('discard.viewGrouped')}
               </button>
               <button
                 type="button"
@@ -152,15 +153,14 @@ export function DiscardInspector({
                 aria-checked={mode === 'order'}
                 className={`hand-toolbar-btn ${mode === 'order' ? 'is-active' : ''}`}
                 onClick={() => setMode('order')}
-                title="Show cards in pile order (bottom → top)"
               >
-                Order
+                {t('discard.viewOrder')}
               </button>
             </div>
             <button
               className="btn btn-ghost btn-sm"
               onClick={onClose}
-              aria-label="Close discard inspector"
+              aria-label={t('common.close')}
               style={{ marginLeft: 4 }}
             >
               ✕
@@ -175,8 +175,7 @@ export function DiscardInspector({
             role="status"
             style={{ margin: 0, fontSize: '0.85rem' }}
           >
-            <strong>Pick one card to leave on the pile.</strong> Every other discard card
-            will move into your hand. The card you click stays on the ground.
+            {t('discard.pickHint')}
           </div>
         )}
 
@@ -184,7 +183,7 @@ export function DiscardInspector({
         <div className="discard-scroll" style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
           {pile.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '1rem', color: 'var(--text-secondary)' }}>
-              Pile is empty.
+              {t('discard.empty')}
             </div>
           ) : mode === 'grouped' ? (
             <div className="col" style={{ gap: '0.6rem' }}>
@@ -252,32 +251,28 @@ export function DiscardInspector({
                     className="btn btn-primary btn-block"
                     onClick={() => setPickerActive(true)}
                   >
-                    Take all + leave one card on the ground
+                    {t('discard.modeLeaveOne')}
                   </button>
                 )}
                 {canTakeAll && (
                   <button
                     className="btn btn-warning btn-block"
                     onClick={onStartTakeAllReturn}
-                    title="Take the whole pile, then choose any card from your hand (including just-picked-up cards) to put back on the pile."
                   >
-                    Take all + return one card from hand
+                    {t('discard.modeReturnFromHand')}
                   </button>
                 )}
                 <p style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', margin: 0 }}>
                   {canLeaveOne && (
                     <>
-                      <strong>Leave-one</strong>: pick any card from the pile to stay on the ground;
-                      every other pile card moves into your hand. No follow-up discard needed.{' '}
+                      {t('discard.tipLeaveOne')}{' '}
                     </>
                   )}
-                  <strong>Take-all + return</strong>: the whole pile moves into your hand and you
-                  put one card back on the pile. The returned card can be one you originally held
-                  or one you just picked up.{' '}
+                  {t('discard.tipReturn')}{' '}
                   {pile.length === 1 && (
-                    <>With only 1 card on the pile, take-all + return is the only legal pickup. </>
+                    <>{t('discard.tipOnlyOne')} </>
                   )}
-                  <strong>Either action ends your turn — you cannot go down or extend a meld this turn.</strong>
+                  <strong>{t('discard.tipTurnEnds')}</strong>
                 </p>
               </>
             ) : (
@@ -288,8 +283,8 @@ export function DiscardInspector({
                 >
                   <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
                     {leaveOneSelected
-                      ? 'Confirm: this card stays on the ground.'
-                      : 'Click a card above to select it.'}
+                      ? t('discard.confirmStay')
+                      : t('discard.clickAbove')}
                   </span>
                   {leaveOneSelected && <SelectedCardBadge card={leaveOneSelected} />}
                 </div>
@@ -301,7 +296,7 @@ export function DiscardInspector({
                       setLeaveOneSelected(null);
                     }}
                   >
-                    Cancel
+                    {t('common.cancel')}
                   </button>
                   <button
                     className="btn btn-success btn-block"
@@ -309,7 +304,7 @@ export function DiscardInspector({
                     disabled={!leaveOneSelected}
                     onClick={confirmLeaveOne}
                   >
-                    {leaveOneSelected ? 'Confirm — take the rest' : 'Pick a card first'}
+                    {leaveOneSelected ? t('discard.confirmTake') : t('discard.pickFirst')}
                   </button>
                 </div>
               </>
@@ -319,7 +314,7 @@ export function DiscardInspector({
 
         {!canTake && (
           <p className="info-banner" style={{ margin: 0, fontSize: '0.85rem' }}>
-            You can only take from the discard pile during the draw phase of your turn.
+            {t('discard.cantTakeNow')}
           </p>
         )}
       </div>

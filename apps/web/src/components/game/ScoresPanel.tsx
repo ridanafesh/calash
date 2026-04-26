@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import type { GameScore, RoomPlayer, RoundStateView } from '@calash/shared';
 import { GAME_CONFIG } from '@calash/shared';
+import { useT } from '@/lib/i18n';
 
 interface ScoresPanelProps {
   players: readonly RoomPlayer[];
@@ -21,6 +22,7 @@ interface ScoresPanelProps {
  * down, scores for cumulative + round breakdown).
  */
 export function ScoresPanel({ players, gameState, scores, myId, onClose }: ScoresPanelProps) {
+  const t = useT();
   const ref = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -71,10 +73,10 @@ export function ScoresPanel({ players, gameState, scores, myId, onClose }: Score
         {/* Header */}
         <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
           <div className="col" style={{ gap: 2 }}>
-            <h2 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0 }}>Scores</h2>
+            <h2 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0 }}>{t('scores.title')}</h2>
             {gameState && (
               <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-                Round {gameState.roundNumber} · target {GAME_CONFIG.WIN_SCORE} pts
+                {t('scores.target', { n: gameState.roundNumber, score: GAME_CONFIG.WIN_SCORE })}
               </span>
             )}
           </div>
@@ -91,7 +93,7 @@ export function ScoresPanel({ players, gameState, scores, myId, onClose }: Score
         <div className="col" style={{ gap: '0.5rem', overflowY: 'auto', minHeight: 0 }}>
           {rows.length === 0 ? (
             <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-              No players in this game.
+              {t('scores.empty')}
             </p>
           ) : (
             rows.map((row, idx) => (
@@ -132,10 +134,10 @@ export function ScoresPanel({ players, gameState, scores, myId, onClose }: Score
                         <span style={{ color: 'var(--text-secondary)', fontWeight: 400 }}> (you)</span>
                       )}
                     </span>
-                    {row.isBot && <span className="badge badge-accent" style={{ fontSize: '0.62rem' }}>BOT</span>}
+                    {row.isBot && <span className="badge badge-accent" style={{ fontSize: '0.62rem' }}>{t('waiting.bot')}</span>}
                     {leaderHasNonZero && row.userId === leaderId && rows.length > 1 && (
-                      <span className="badge badge-success" style={{ fontSize: '0.62rem' }} title="Leading">
-                        ★ LEADER
+                      <span className="badge badge-success" style={{ fontSize: '0.62rem' }}>
+                        {t('scores.leader')}
                       </span>
                     )}
                   </div>
@@ -158,23 +160,23 @@ export function ScoresPanel({ players, gameState, scores, myId, onClose }: Score
                 {/* Per-round status row */}
                 <div className="row" style={{ gap: 6, flexWrap: 'wrap', fontSize: '0.72rem' }}>
                   {row.isCurrentTurn && (
-                    <span className="badge badge-warning" style={{ fontSize: '0.62rem' }}>▶ Turn</span>
+                    <span className="badge badge-warning" style={{ fontSize: '0.62rem' }}>{t('scores.turn')}</span>
                   )}
                   {row.isDealer && (
-                    <span className="badge badge-neutral" style={{ fontSize: '0.62rem' }}>🃏 Dealer</span>
+                    <span className="badge badge-neutral" style={{ fontSize: '0.62rem' }}>{t('scores.dealer')}</span>
                   )}
                   {row.hasGoneDown ? (
                     <span className="badge badge-accent" style={{ fontSize: '0.62rem' }}>
-                      DOWN · {row.tableTotal} pts
+                      {t('scores.openedFor', { n: row.tableTotal })}
                     </span>
                   ) : (
                     <span className="badge badge-neutral" style={{ fontSize: '0.62rem' }}>
-                      not opened
+                      {t('scores.notOpened')}
                     </span>
                   )}
                   {row.rounds.length > 0 && (
                     <span style={{ color: 'var(--text-secondary)', marginLeft: 'auto' }}>
-                      Rounds:{' '}
+                      {t('scores.rounds')}{' '}
                       {row.rounds.map((r, i) => (
                         <span
                           key={i}
@@ -196,7 +198,7 @@ export function ScoresPanel({ players, gameState, scores, myId, onClose }: Score
         </div>
 
         <p style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', margin: 0, textAlign: 'center' }}>
-          First player to reach {GAME_CONFIG.WIN_SCORE} pts wins the game.
+          {t('scores.firstToWin', { score: GAME_CONFIG.WIN_SCORE })}
         </p>
       </div>
     </div>

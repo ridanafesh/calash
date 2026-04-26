@@ -1053,3 +1053,30 @@ a:focus-visible {
     display: none;
   }
 }
+
+/* ── RTL overrides ───────────────────────────────────────────────────────────
+   The whole app uses logical properties (gap, padding, margin shorthands,
+   flex with default flex-direction) so it largely mirrors automatically
+   when <html dir="rtl"> is set by the I18nProvider. The few rules below
+   patch directional details that don't auto-mirror well.
+
+   Hand overlap: marginLeft was replaced by marginInlineStart on the JSX
+   side, so cards bleed in the correct direction in both modes.
+*/
+[dir="rtl"] body {
+  /* Tahoma/Arial render Arabic glyphs more cleanly than Segoe UI on
+     Windows; macOS/Linux fall through to system Arabic fonts. */
+  font-family: 'Tahoma', 'Arial', 'Segoe UI', Roboto, sans-serif;
+}
+
+/* Card values stay LTR — they're Latin glyphs and read naturally
+   left-to-right even on an RTL page. */
+[dir="rtl"] .card-value,
+[dir="rtl"] .room-code {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+/* The discard inspector legend chip uses an arrow (→) that has correct
+   bidi behavior; nothing to override. */
+

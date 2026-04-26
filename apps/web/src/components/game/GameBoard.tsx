@@ -4,6 +4,8 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
 import { useGame } from '@/lib/game-context';
+import { useT } from '@/lib/i18n';
+import { LanguageSwitcher } from '@/components/LanguageSwitcher';
 import { GAME_CONFIG, CARD_VALUES } from '@calash/shared';
 import type { Card, JokerAssignment, MeldType, TurnAction, Suit } from '@calash/shared';
 import { CardView, CardBack, cardId, cardEquals } from './CardView';
@@ -32,6 +34,7 @@ export function GameBoard() {
   const { user } = useAuth();
   const { room, gameState, hand, myDrawnCard, roundResult, winner, scores, submitAction, leaveRoom, clearRoundResult, roomError, clearError } =
     useGame();
+  const t = useT();
 
   const myId = user?.id ?? '';
 
@@ -395,7 +398,7 @@ export function GameBoard() {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', flexDirection: 'column', gap: 16 }}>
         <div className="spinner spinner-lg" />
-        <span style={{ color: 'var(--text-secondary)' }}>Loading game…</span>
+        <span style={{ color: 'var(--text-secondary)' }}>{t('common.loading')}</span>
       </div>
     );
   }
@@ -444,32 +447,32 @@ export function GameBoard() {
       {/* ── Header ── */}
       <div className="game-header">
         <span style={{ fontWeight: 700, color: 'var(--accent)' }}>Calash</span>
-        <span className="badge badge-neutral">Round {gameState.roundNumber}</span>
+        <span className="badge badge-neutral">{t('game.round', { n: gameState.roundNumber })}</span>
         <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
-          Deck: {gameState.hiddenDeckCount}
+          {t('game.deck')}: {gameState.hiddenDeckCount}
         </span>
         <div style={{ flex: 1 }} />
         {isMyTurn ? (
-          <span className="badge badge-success">Your turn</span>
+          <span className="badge badge-success">{t('game.yourTurn')}</span>
         ) : isBot(gameState.currentTurnPlayerId) ? (
           <span className="row" style={{ gap: 6, fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
             <span className="spinner" style={{ width: 12, height: 12 }} aria-hidden="true" />
-            {nameOf(gameState.currentTurnPlayerId)} is thinking…
+            {t('game.botThinking', { name: nameOf(gameState.currentTurnPlayerId) })}
           </span>
         ) : (
           <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
-            {nameOf(gameState.currentTurnPlayerId)}&apos;s turn
+            {t('game.opponentTurn', { name: nameOf(gameState.currentTurnPlayerId) })}
           </span>
         )}
+        <LanguageSwitcher />
         <button
           className="btn btn-ghost btn-sm"
           onClick={() => setScoresOpen(true)}
-          title="Show all players' cumulative scores"
         >
-          📊 Scores
+          {t('game.scores')}
         </button>
         <button className="btn btn-ghost btn-sm" onClick={leaveRoom}>
-          Leave
+          {t('game.leave')}
         </button>
       </div>
 
@@ -498,13 +501,13 @@ export function GameBoard() {
                 <span style={{ fontSize: '0.82rem', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 100 }}>
                   {nameOf(opId)}
                 </span>
-                {isBot(opId) && <span className="badge badge-accent" style={{ fontSize: '0.62rem' }}>BOT</span>}
+                {isBot(opId) && <span className="badge badge-accent" style={{ fontSize: '0.62rem' }}>{t('waiting.bot')}</span>}
                 {isOpTurn && <span className="badge badge-warning" style={{ fontSize: '0.68rem' }}>▶</span>}
-                {op?.hasGoneDown && <span className="badge badge-accent" style={{ fontSize: '0.68rem' }}>DOWN</span>}
+                {op?.hasGoneDown && <span className="badge badge-accent" style={{ fontSize: '0.68rem' }}>{t('game.down')}</span>}
               </div>
               {opScore && (
                 <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                  {opScore.total} pts
+                  {opScore.total} {t('common.points')}
                 </div>
               )}
               <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
@@ -538,32 +541,31 @@ export function GameBoard() {
       {/* ── Table: deck + discard ── */}
       <div className="table-area">
         <div className="pile-slot">
-          <div className="pile-label">Draw pile</div>
+          <div className="pile-label">{t('game.drawPile')}</div>
           <div style={{ cursor: canDrawOrTake ? 'pointer' : 'default' }} onClick={canDrawOrTake ? drawFromDeck : undefined}>
             <CardBack size="md" />
           </div>
           <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
-            {gameState.hiddenDeckCount} left
+            {t('game.deckLeft', { n: gameState.hiddenDeckCount })}
           </div>
           {canDrawOrTake && (
             <button className="btn btn-primary btn-sm" onClick={drawFromDeck}>
-              Draw
+              {t('game.draw')}
             </button>
           )}
         </div>
 
         <div className="pile-slot">
-          <div className="pile-label">Discard ({discardPile.length})</div>
+          <div className="pile-label">{t('game.discardPile')} ({discardPile.length})</div>
           <div
             style={{ cursor: discardPile.length > 0 ? 'pointer' : 'default' }}
             onClick={discardPile.length > 0 ? () => setDiscardInspectorOpen(true) : undefined}
-            title={discardPile.length > 0 ? 'Click to inspect the full pile' : 'Pile is empty'}
           >
             {topDiscard ? (
               <CardView card={topDiscard} size="md" />
             ) : (
               <div style={{ width: 84, height: 118, borderRadius: 5, border: '1.5px dashed rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <span style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.25)' }}>empty</span>
+                <span style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.25)' }}>{t('game.empty')}</span>
               </div>
             )}
           </div>
@@ -571,9 +573,8 @@ export function GameBoard() {
             <button
               className="btn btn-ghost btn-sm"
               onClick={() => setDiscardInspectorOpen(true)}
-              title="View all cards on the pile"
             >
-              Inspect
+              {t('game.inspect')}
             </button>
           )}
         </div>
@@ -582,15 +583,15 @@ export function GameBoard() {
       {/* ── My melds ── */}
       <div className="my-section">
         <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.45)' }}>
-          My melds
+          {t('game.myMelds')}
           {myState?.hasGoneDown && (
             <span className="badge badge-accent" style={{ marginLeft: 8, fontSize: '0.68rem' }}>
-              DOWN · {myState.tableTotal} pts
+              {t('game.down')} · {myState.tableTotal} {t('common.points')}
             </span>
           )}
           {!myState?.hasGoneDown && isMyTurn && (
             <span style={{ marginLeft: 8, color: 'var(--text-secondary)', fontSize: '0.75rem' }}>
-              need ≥{goDownThreshold} pts
+              {t('game.needPts', { n: goDownThreshold })}
             </span>
           )}
         </div>
@@ -640,7 +641,7 @@ export function GameBoard() {
           })}
           {(!myState?.melds || myState.melds.length === 0) && (
             <span style={{ color: 'rgba(255,255,255,0.18)', fontSize: '0.78rem', alignSelf: 'center' }}>
-              No melds placed
+              {t('game.noMelds')}
             </span>
           )}
         </div>
@@ -656,9 +657,9 @@ export function GameBoard() {
         <div className="go-down-panel">
           <div className="row" style={{ justifyContent: 'space-between', marginBottom: 4 }}>
             <div className="row" style={{ gap: 8 }}>
-              <span style={{ fontWeight: 700, fontSize: '0.88rem' }}>New Meld</span>
+              <span style={{ fontWeight: 700, fontSize: '0.88rem' }}>{t('game.newMeld.title')}</span>
             </div>
-            <button className="btn btn-ghost btn-sm" onClick={cancelMode} disabled={submitting}>Cancel</button>
+            <button className="btn btn-ghost btn-sm" onClick={cancelMode} disabled={submitting}>{t('common.cancel')}</button>
           </div>
 
           {roomError && (
@@ -667,7 +668,6 @@ export function GameBoard() {
               <button
                 onClick={clearError}
                 style={{ marginLeft: 8, background: 'none', border: 'none', cursor: 'pointer', color: 'inherit' }}
-                aria-label="Dismiss error"
               >✕</button>
             </div>
           )}
@@ -675,8 +675,8 @@ export function GameBoard() {
           <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
               {selectedCards.length > 0
-                ? `${selectedCards.length} selected (${sumCards(selectedCards)} pts)`
-                : 'Select cards below'}
+                ? t('game.goDown.cardsSelected', { n: selectedCards.length, pts: sumCards(selectedCards) })
+                : t('game.goDown.pickFromHand')}
             </span>
             {selectedCards.length >= 3 && (
               <span
@@ -692,29 +692,27 @@ export function GameBoard() {
                 }}
               >
                 {meldFitness.isValidSequence && meldFitness.isValidSet
-                  ? '✓ valid sequence or set'
+                  ? t('game.goDown.validSequenceOrSet')
                   : meldFitness.isValidSequence
-                    ? '✓ valid sequence'
+                    ? t('game.goDown.validSequence')
                     : meldFitness.isValidSet
-                      ? '✓ valid set'
-                      : '✗ not a valid meld'}
+                      ? t('game.goDown.validSet')
+                      : t('game.goDown.invalidMeld')}
               </span>
             )}
             <button
               className="btn btn-ghost btn-sm"
               disabled={submitting || !meldFitness.isValidSet}
-              title={meldFitness.isValidSet ? 'Submit as set' : 'Selected cards do not form a valid set'}
               onClick={() => submitAddNewMeld('set')}
             >
-              {submitting ? 'Submitting…' : 'Submit as Set'}
+              {submitting ? t('game.goDown.submitting') : t('game.newMeld.submitSet')}
             </button>
             <button
               className="btn btn-ghost btn-sm"
               disabled={submitting || !meldFitness.isValidSequence}
-              title={meldFitness.isValidSequence ? 'Submit as sequence' : 'Selected cards do not form a valid sequence'}
               onClick={() => submitAddNewMeld('sequence')}
             >
-              {submitting ? 'Submitting…' : 'Submit as Sequence'}
+              {submitting ? t('game.goDown.submitting') : t('game.newMeld.submitSequence')}
             </button>
           </div>
         </div>
@@ -725,19 +723,17 @@ export function GameBoard() {
         <div className="go-down-panel" style={{ borderTopColor: 'var(--warning)' }}>
           <div className="row" style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
             <span style={{ color: 'var(--warning)', fontSize: '0.88rem', fontWeight: 600 }}>
-              Taking all {discardPile.length} — pick ANY card to put back on the pile.
+              {t('game.takeAll.banner', { n: discardPile.length })}
             </span>
-            <button className="btn btn-ghost btn-sm" onClick={cancelMode}>Cancel</button>
+            <button className="btn btn-ghost btn-sm" onClick={cancelMode}>{t('common.cancel')}</button>
           </div>
           <p style={{ margin: 0, fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
-            You may return one of your existing hand cards <strong>or</strong> one of the
-            cards you just picked up from the pile (shown below in the “picked up” strip).
-            Your turn ends as soon as you click.
+            {t('game.takeAll.tip')}
           </p>
           {discardPile.length > 0 && (
             <div className="col" style={{ gap: 4, marginTop: 6 }}>
               <span style={{ fontSize: '0.72rem', color: 'rgba(255,255,255,0.55)' }}>
-                Just picked up — click any card to put it back on the pile:
+                {t('game.takeAll.pickedUp')}
               </span>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                 {discardPile.map((c) => (
@@ -759,12 +755,12 @@ export function GameBoard() {
           <div className="row" style={{ justifyContent: 'space-between' }}>
             <span style={{ fontSize: '0.88rem' }}>
               {submitting
-                ? 'Submitting…'
+                ? t('game.addToMeld.submitting')
                 : selectedCards.length > 0
-                  ? `${selectedCards.length} cards selected — click a meld above`
-                  : 'Select cards from hand, then click a meld above'}
+                  ? t('game.addToMeld.selected', { n: selectedCards.length })
+                  : t('game.addToMeld.prompt')}
             </span>
-            <button className="btn btn-ghost btn-sm" onClick={cancelMode} disabled={submitting}>Cancel</button>
+            <button className="btn btn-ghost btn-sm" onClick={cancelMode} disabled={submitting}>{t('common.cancel')}</button>
           </div>
           {roomError && (
             <div className="error-banner" role="alert" style={{ marginTop: 4 }}>
@@ -772,7 +768,6 @@ export function GameBoard() {
               <button
                 onClick={clearError}
                 style={{ marginLeft: 8, background: 'none', border: 'none', cursor: 'pointer', color: 'inherit' }}
-                aria-label="Dismiss error"
               >✕</button>
             </div>
           )}
@@ -816,11 +811,14 @@ export function GameBoard() {
                   key={cardId(card)}
                   className={`hand-card${sel ? ' is-selected' : ''}`}
                   style={{
-                    // First card has no leftward bleed; rest overlap.
-                    marginLeft: i === 0 ? 0 : overlap,
-                    // Default z-index ramps left-to-right so a right-hand
-                    // card naturally sits on top of the one to its left.
-                    // CSS hover/selected boosts override.
+                    // First card has no inline-start bleed; rest overlap.
+                    // Using marginInlineStart (instead of marginLeft) means
+                    // the overlap mirrors automatically in RTL — Arabic
+                    // mode bleeds rightward without any extra logic.
+                    marginInlineStart: i === 0 ? 0 : overlap,
+                    // Default z-index ramps in array order so the LAST card
+                    // sits on top, regardless of direction. CSS hover/
+                    // selected boosts still override.
                     zIndex: i + 1,
                   }}
                 >
@@ -840,7 +838,7 @@ export function GameBoard() {
           })()}
           {hand.length === 0 && (
             <span style={{ color: 'rgba(255,255,255,0.18)', fontSize: '0.82rem', alignSelf: 'center' }}>
-              No cards in hand
+              {t('game.noCards')}
             </span>
           )}
         </div>
@@ -850,21 +848,25 @@ export function GameBoard() {
       {mode === 'idle' && !submitting && selectedCards.length > 0 && extendableMeldIds.size > 0 &&
         isMyTurn && myState?.hasGoneDown && !gameState?.didTakeFromDiscardThisTurn && (
         <div className="info-banner" role="status" style={{ margin: '0 12px 4px' }}>
-          ✨ {extendableMeldIds.size === 1 ? '1 meld' : `${extendableMeldIds.size} melds`} can be extended — click the highlighted meld above
+          {t('game.action.extendableHint', {
+            count:
+              extendableMeldIds.size === 1
+                ? t('game.action.extendable.one')
+                : t('game.action.extendable.many', { n: extendableMeldIds.size }),
+          })}
         </div>
       )}
 
       {/* ── Drawn-card preview (Keep / Discard) ── */}
       {isPendingDecision && pendingDrawnCard && (
-        <div className="drawn-card-preview" role="region" aria-label="Drawn card decision">
+        <div className="drawn-card-preview" role="region">
           <div className="drawn-card-preview-card">
             <CardView card={pendingDrawnCard} size="md" />
           </div>
           <div className="drawn-card-preview-body">
-            <div className="drawn-card-preview-title">You drew this card</div>
+            <div className="drawn-card-preview-title">{t('game.drawn.title')}</div>
             <p className="drawn-card-preview-help">
-              Keep it (then discard one card from hand to end your turn) or
-              discard it directly to the pile.
+              {t('game.drawn.help')}
             </p>
             {roomError && (
               <div className="error-banner" role="alert" style={{ margin: 0 }}>
@@ -872,7 +874,6 @@ export function GameBoard() {
                 <button
                   onClick={clearError}
                   style={{ marginLeft: 8, background: 'none', border: 'none', cursor: 'pointer', color: 'inherit' }}
-                  aria-label="Dismiss error"
                 >✕</button>
               </div>
             )}
@@ -882,23 +883,22 @@ export function GameBoard() {
                 disabled={submitting}
                 onClick={keepDrawnCard}
               >
-                ✓ Keep
+                {t('game.drawn.keep')}
               </button>
               <button
                 className="btn btn-danger"
                 disabled={submitting}
                 onClick={discardDrawnCardDirect}
-                title="Send the drawn card straight to the discard pile and end your turn"
+                title={t('game.drawn.discardDirect')}
               >
-                ✕ Discard
+                {t('game.drawn.discard')}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Pending-decision view for opponents — REDACTED. We render a card-back
-          so the player sees the activity without seeing the card's identity. */}
+      {/* Pending-decision view for opponents — REDACTED. */}
       {!isPendingDecision && gameState.turnPhase === 'pending-drawn-decision'
         && gameState.pendingDrawnCardPresent && (
         <div className="drawn-card-preview drawn-card-preview--watch" role="status">
@@ -907,7 +907,7 @@ export function GameBoard() {
           </div>
           <div className="drawn-card-preview-body">
             <div className="drawn-card-preview-title">
-              {nameOf(gameState.currentTurnPlayerId)} drew a card and is deciding…
+              {t('game.drawn.opponentDeciding', { name: nameOf(gameState.currentTurnPlayerId) })}
             </div>
           </div>
         </div>
@@ -931,21 +931,21 @@ export function GameBoard() {
           <span className="row" style={{ gap: 6, color: 'var(--text-secondary)', fontSize: '0.82rem' }}>
             {isBot(gameState.currentTurnPlayerId) && <span className="spinner" style={{ width: 12, height: 12 }} aria-hidden="true" />}
             {isBot(gameState.currentTurnPlayerId)
-              ? `${nameOf(gameState.currentTurnPlayerId)} is thinking…`
-              : `Waiting for ${nameOf(gameState.currentTurnPlayerId)}…`}
+              ? t('game.botThinking', { name: nameOf(gameState.currentTurnPlayerId) })
+              : t('game.action.waitingFor', { name: nameOf(gameState.currentTurnPlayerId) })}
           </span>
         )}
         {canDrawOrTake && mode === 'idle' && (
           <>
-            <button className="btn btn-primary" disabled={submitting} onClick={drawFromDeck}>Draw from deck</button>
+            <button className="btn btn-primary" disabled={submitting} onClick={drawFromDeck}>{t('game.action.drawFromDeck')}</button>
             {discardPile.length >= 1 && (
               <button
                 className="btn btn-ghost"
                 disabled={submitting}
                 onClick={() => setDiscardInspectorOpen(true)}
-                title="Open pile inspector to take cards"
+                title={t('game.action.openInspector')}
               >
-                Take from discard…
+                {t('game.action.takeFromDiscard')}
               </button>
             )}
           </>
@@ -954,14 +954,14 @@ export function GameBoard() {
           <>
             {canGoDown && (
               <button className="btn btn-success" disabled={submitting} onClick={() => { setMode('go-down'); setSelectedCards([]); clearError(); }}>
-                Go down (≥{goDownThreshold} pts)
+                {t('game.action.goDown', { n: goDownThreshold })}
               </button>
             )}
             {canAddMelds && (
               <>
-                <button className="btn btn-ghost btn-sm" disabled={submitting} onClick={() => { setMode('add-new-meld'); setSelectedCards([]); clearError(); }}>+ New meld</button>
+                <button className="btn btn-ghost btn-sm" disabled={submitting} onClick={() => { setMode('add-new-meld'); setSelectedCards([]); clearError(); }}>{t('game.action.newMeld')}</button>
                 <button className="btn btn-ghost btn-sm" disabled={submitting || selectedCards.length === 0} onClick={() => { setMode('add-to-meld'); clearError(); }}>
-                  Add to meld
+                  {t('game.action.addToMeld')}
                 </button>
               </>
             )}
@@ -972,10 +972,10 @@ export function GameBoard() {
               onClick={discard}
             >
               {submitting
-                ? 'Discarding…'
+                ? t('game.action.discarding')
                 : selectedCards.length === 1
-                  ? 'Discard ✓'
-                  : 'Discard (select 1)'}
+                  ? t('game.action.discard')
+                  : t('game.action.discardSelectOne')}
             </button>
           </>
         )}
@@ -1014,12 +1014,12 @@ export function GameBoard() {
         <div className="overlay">
           <div className="result-modal">
             <h2 style={{ fontSize: '1.3rem', fontWeight: 700, textAlign: 'center' }}>
-              Round {roundResult.roundNumber} Result
+              {t('round.title', { n: roundResult.roundNumber })}
             </h2>
             <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', textAlign: 'center' }}>
               {roundResult.endReason === 'player-finished' && roundResult.finisherPlayerId
-                ? `${nameOf(roundResult.finisherPlayerId)} emptied their hand!`
-                : 'Draw pile exhausted'}
+                ? t('round.finisher', { name: nameOf(roundResult.finisherPlayerId) })
+                : t('round.deckExhausted')}
             </div>
             <div className="col" style={{ gap: '0.45rem', marginTop: 8 }}>
               {[...roundResult.playerScores]
@@ -1028,10 +1028,10 @@ export function GameBoard() {
                   <div key={ps.playerId} className="surface-sm row" style={{ justifyContent: 'space-between', gap: 8 }}>
                     <div className="row" style={{ gap: 6 }}>
                       <span style={{ fontWeight: ps.playerId === myId ? 700 : 400 }}>
-                        {nameOf(ps.playerId)}{ps.playerId === myId ? ' (you)' : ''}
+                        {nameOf(ps.playerId)}{ps.playerId === myId ? ` ${t('waiting.you')}` : ''}
                       </span>
-                      {isBot(ps.playerId) && <span className="badge badge-accent" style={{ fontSize: '0.62rem' }}>BOT</span>}
-                      {ps.finishedFirst && <span className="badge badge-success" style={{ fontSize: '0.68rem' }}>+20</span>}
+                      {isBot(ps.playerId) && <span className="badge badge-accent" style={{ fontSize: '0.62rem' }}>{t('waiting.bot')}</span>}
+                      {ps.finishedFirst && <span className="badge badge-success" style={{ fontSize: '0.68rem' }}>{t('round.bonus')}</span>}
                     </div>
                     <div className="row" style={{ gap: 10 }}>
                       <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
@@ -1047,12 +1047,12 @@ export function GameBoard() {
             {scores.length > 0 && (
               <>
                 <div className="divider" />
-                <div style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: 6 }}>Cumulative</div>
+                <div style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: 6 }}>{t('round.cumulative')}</div>
                 {[...scores].sort((a, b) => b.total - a.total).map((s) => (
                   <div key={s.playerId} className="row" style={{ justifyContent: 'space-between' }}>
                     <span style={{ fontSize: '0.9rem' }}>
-                      {nameOf(s.playerId)}{s.playerId === myId ? ' (you)' : ''}
-                      {isBot(s.playerId) && <span className="badge badge-accent" style={{ fontSize: '0.62rem', marginLeft: 6 }}>BOT</span>}
+                      {nameOf(s.playerId)}{s.playerId === myId ? ` ${t('waiting.you')}` : ''}
+                      {isBot(s.playerId) && <span className="badge badge-accent" style={{ fontSize: '0.62rem', marginLeft: 6 }}>{t('waiting.bot')}</span>}
                     </span>
                     <span style={{ fontWeight: 700 }}>{s.total} / {GAME_CONFIG.WIN_SCORE}</span>
                   </div>
@@ -1061,14 +1061,14 @@ export function GameBoard() {
             )}
             {roundResult.nextDealerId && (
               <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', textAlign: 'center', marginTop: 4 }}>
-                Next dealer: <strong style={{ color: 'var(--text-primary)' }}>{nameOf(roundResult.nextDealerId)}</strong>
+                {t('round.nextDealer')} <strong style={{ color: 'var(--text-primary)' }}>{nameOf(roundResult.nextDealerId)}</strong>
               </div>
             )}
             <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', textAlign: 'center', margin: 0 }}>
-              Round {(roundResult.roundNumber ?? 0) + 1} starts in a few seconds…
+              {t('round.nextRoundIn', { n: (roundResult.roundNumber ?? 0) + 1 })}
             </p>
             <button className="btn btn-ghost" onClick={clearRoundResult}>
-              Dismiss
+              {t('round.dismiss')}
             </button>
           </div>
         </div>
@@ -1080,13 +1080,13 @@ export function GameBoard() {
           <div className="result-modal" style={{ textAlign: 'center', gap: '1rem' }}>
             <div style={{ fontSize: '3.5rem' }}>🏆</div>
             <h2 style={{ fontSize: '1.7rem', fontWeight: 800 }}>
-              {winner.playerId === myId ? 'You Win!' : `${nameOf(winner.playerId)} wins!`}
+              {winner.playerId === myId ? t('game.youWin') : t('game.opponentWins', { name: nameOf(winner.playerId) })}
             </h2>
             <div style={{ color: 'var(--text-secondary)' }}>
-              Final score: <strong>{winner.finalScore}</strong> pts
+              {t('game.finalScore')} <strong>{winner.finalScore}</strong> {t('common.points')}
             </div>
             <Link href="/lobby" className="btn btn-primary btn-lg" style={{ marginTop: 8 }} onClick={leaveRoom}>
-              Back to Lobby
+              {t('game.backToLobby')}
             </Link>
           </div>
         </div>
@@ -1125,11 +1125,11 @@ export function GameBoard() {
         >
           <div className="go-down-popup-header">
             <div className="row" style={{ gap: 10, flexWrap: 'wrap' }}>
-              <h2 className="go-down-popup-title">Go Down</h2>
+              <h2 className="go-down-popup-title">{t('game.goDown.title')}</h2>
               <span style={{ fontSize: '0.86rem', color: meetsGoDownRule ? 'var(--success)' : 'var(--text-secondary)', fontWeight: 600 }}>
-                {pendingTotal} / {goDownThreshold} pts
+                {t('game.goDown.totals', { got: pendingTotal, need: goDownThreshold })}
                 {wouldFinishHand && pendingTotal < goDownThreshold && (
-                  <span style={{ marginLeft: 6, color: 'var(--success)' }}>• finish hand!</span>
+                  <span style={{ marginLeft: 6, color: 'var(--success)' }}>{t('game.goDown.finishHand')}</span>
                 )}
               </span>
             </div>
@@ -1137,9 +1137,8 @@ export function GameBoard() {
               className="btn btn-ghost btn-sm"
               onClick={cancelMode}
               disabled={submitting}
-              aria-label="Cancel go-down and close popup"
             >
-              ✕ Cancel
+              {t('game.goDown.cancel')}
             </button>
           </div>
 
@@ -1149,7 +1148,6 @@ export function GameBoard() {
               <button
                 onClick={clearError}
                 style={{ marginLeft: 8, background: 'none', border: 'none', cursor: 'pointer', color: 'inherit' }}
-                aria-label="Dismiss error"
               >✕</button>
             </div>
           )}
@@ -1165,7 +1163,7 @@ export function GameBoard() {
                 flexShrink: 0,
               }}
             >
-              Selected melds {pendingMelds.length > 0 && `(${pendingMelds.length})`}
+              {t('game.goDown.selectedMelds')} {pendingMelds.length > 0 && `(${pendingMelds.length})`}
             </span>
             <div className="pending-melds">
               {pendingMelds.map((pm, i) => (
@@ -1180,7 +1178,6 @@ export function GameBoard() {
                     style={{ fontSize: 11 }}
                     disabled={submitting}
                     onClick={() => setPendingMelds((p) => p.filter((_, j) => j !== i))}
-                    aria-label="Remove this meld from selection"
                   >✕</button>
                 </div>
               ))}
@@ -1190,8 +1187,8 @@ export function GameBoard() {
           <div className="go-down-popup-footer">
             <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
               {selectedCards.length > 0
-                ? `${selectedCards.length} selected (${sumCards(selectedCards)} pts)`
-                : 'Pick cards from your hand below'}
+                ? t('game.goDown.cardsSelected', { n: selectedCards.length, pts: sumCards(selectedCards) })
+                : t('game.goDown.pickFromHand')}
             </span>
             {selectedCards.length >= 3 && (
               <span
@@ -1207,50 +1204,48 @@ export function GameBoard() {
                 }}
               >
                 {meldFitness.isValidSequence && meldFitness.isValidSet
-                  ? '✓ valid sequence or set'
+                  ? t('game.goDown.validSequenceOrSet')
                   : meldFitness.isValidSequence
-                    ? '✓ valid sequence'
+                    ? t('game.goDown.validSequence')
                     : meldFitness.isValidSet
-                      ? '✓ valid set'
-                      : '✗ not a valid meld'}
+                      ? t('game.goDown.validSet')
+                      : t('game.goDown.invalidMeld')}
               </span>
             )}
             <div style={{ flex: 1 }} />
             <button
               className="btn btn-ghost btn-sm"
               disabled={submitting || !meldFitness.isValidSet}
-              title={meldFitness.isValidSet ? 'Add as set' : 'Selected cards do not form a valid set (same rank, distinct suits)'}
               onClick={() => addToPendingMeld('set')}
             >
-              + Set
+              {t('game.goDown.addSet')}
             </button>
             <button
               className="btn btn-ghost btn-sm"
               disabled={submitting || !meldFitness.isValidSequence}
-              title={meldFitness.isValidSequence ? 'Add as sequence' : 'Selected cards do not form a valid sequence (same suit, consecutive ranks)'}
               onClick={() => addToPendingMeld('sequence')}
             >
-              + Sequence
+              {t('game.goDown.addSequence')}
             </button>
             <button
               className="btn btn-success btn-sm"
               disabled={submitting || pendingMelds.length === 0 || !meetsGoDownRule}
               title={
                 pendingMelds.length === 0
-                  ? 'Add at least one meld first'
+                  ? undefined
                   : meetsGoDownRule
                     ? wouldFinishHand && pendingTotal < goDownThreshold
-                      ? 'Below threshold, but this go-down empties your hand — round will end with +20 bonus'
+                      ? t('game.goDown.tipFinish')
                       : undefined
-                    : `Need ${goDownThreshold} pts (or use all but one card to finish your hand)`
+                    : t('game.goDown.tipNeed', { need: goDownThreshold })
               }
               onClick={submitGoDown}
             >
               {submitting
-                ? <><span className="spinner" style={{ width: 12, height: 12 }} aria-hidden="true" />Submitting…</>
+                ? <><span className="spinner" style={{ width: 12, height: 12 }} aria-hidden="true" />{t('game.goDown.submitting')}</>
                 : wouldFinishHand && pendingTotal < goDownThreshold
-                  ? `Finish & win (${pendingTotal} pts)`
-                  : `Submit (${pendingTotal} pts)`}
+                  ? t('game.goDown.finishWin', { pts: pendingTotal })
+                  : t('game.goDown.submit', { pts: pendingTotal })}
             </button>
           </div>
         </div>

@@ -1,6 +1,11 @@
+'use client';
+
 import Link from 'next/link';
+import { useT } from '@/lib/i18n';
+import { LanguageSwitcher } from '@/components/LanguageSwitcher';
 
 export default function Home() {
+  const t = useT();
   return (
     <main
       style={{
@@ -12,8 +17,15 @@ export default function Home() {
         gap: '1.5rem',
         padding: '2rem',
         background: 'radial-gradient(ellipse at 50% 0%, rgba(99,102,241,0.12) 0%, transparent 60%)',
+        position: 'relative',
       }}
     >
+      {/* Top-right language switcher — always reachable so a first-time
+          visitor can flip the UI before signing in. */}
+      <div style={{ position: 'absolute', top: 16, right: 16 }}>
+        <LanguageSwitcher />
+      </div>
+
       {/* Card suit decorations */}
       <div style={{ fontSize: '2.5rem', opacity: 0.15, letterSpacing: '1rem', marginBottom: '-1rem' }}>
         ♠ ♥ ♣ ♦
@@ -34,15 +46,15 @@ export default function Home() {
       </h1>
 
       <p style={{ color: 'var(--text-secondary)', fontSize: '1.1rem', textAlign: 'center', maxWidth: 360 }}>
-        Multiplayer rummy-style card game. Build melds, go down, and be the first to 1000 points.
+        {t('landing.tagline')}
       </p>
 
       <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', justifyContent: 'center' }}>
         <Link href="/auth/login" className="btn btn-ghost btn-lg">
-          Play as Guest
+          {t('landing.playAsGuest')}
         </Link>
         <Link href="/auth/register" className="btn btn-primary btn-lg">
-          Create Account →
+          {t('landing.createAccount')}
         </Link>
       </div>
 
@@ -57,9 +69,9 @@ export default function Home() {
           justifyContent: 'center',
         }}
       >
-        <span>✓ Real-time multiplayer</span>
-        <span>✓ 2–4 players</span>
-        <span>✓ No download needed</span>
+        <span>{t('landing.feature.realtime')}</span>
+        <span>{t('landing.feature.players')}</span>
+        <span>{t('landing.feature.noDownload')}</span>
       </div>
     </main>
   );

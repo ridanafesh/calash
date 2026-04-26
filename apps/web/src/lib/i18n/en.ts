@@ -1,0 +1,288 @@
+/**
+ * English translation dictionary. Keys are namespaced by feature
+ * (landing.*, auth.*, lobby.*, game.*, common.*) so additions stay
+ * organized as the app grows. The Arabic dictionary mirrors this
+ * shape — every key here MUST exist in ar.ts.
+ *
+ * Use {{variable}} for interpolation. Example:
+ *   "scores.youOwe": "You owe {{amount}} points"
+ */
+
+export const en: Record<string, string> = {
+  // ─── Common ──────────────────────────────────────────────────────────────
+  'common.cancel': 'Cancel',
+  'common.submit': 'Submit',
+  'common.close': 'Close',
+  'common.dismiss': 'Dismiss',
+  'common.back': 'Back',
+  'common.loading': 'Loading…',
+  'common.you': 'you',
+  'common.points': 'pts',
+
+  // ─── App / language switcher ─────────────────────────────────────────────
+  'lang.en': 'English',
+  'lang.ar': 'العربية',
+  'lang.switchTo': 'Switch language',
+
+  // ─── Landing page ────────────────────────────────────────────────────────
+  'landing.tagline': 'Multiplayer rummy-style card game. Build melds, go down, and be the first to 1000 points.',
+  'landing.playAsGuest': 'Play as Guest',
+  'landing.createAccount': 'Create Account →',
+  'landing.feature.realtime': '✓ Real-time multiplayer',
+  'landing.feature.players': '✓ 2–4 players',
+  'landing.feature.noDownload': '✓ No download needed',
+
+  // ─── Auth ────────────────────────────────────────────────────────────────
+  'auth.login.title': 'Welcome to Calash',
+  'auth.login.subtitle': 'Sign in to play with friends in real time.',
+  'auth.email': 'Email',
+  'auth.emailPlaceholder': 'you@example.com',
+  'auth.password': 'Password',
+  'auth.passwordPlaceholder': 'Your password',
+  'auth.signIn': 'Sign in',
+  'auth.signingIn': 'Signing in…',
+  'auth.continueAsGuest': 'Continue as guest',
+  'auth.startingGuest': 'Starting guest session…',
+  'auth.googleFailed': 'Google sign-in failed',
+  'auth.googleNoCredential': 'Google sign-in returned no credential',
+  'auth.loginFailed': 'Login failed',
+  'auth.guestFailed': 'Could not start guest session',
+  'auth.noAccount': 'No account?',
+  'auth.createOne': 'Create one',
+  'auth.haveAccount': 'Already have an account?',
+  'auth.divider.or': 'or',
+
+  'auth.register.title': 'Create your account',
+  'auth.username': 'Username',
+  'auth.usernamePlaceholder': 'Pick a display name',
+  'auth.register.submit': 'Create account',
+  'auth.register.submitting': 'Creating account…',
+  'auth.register.failed': 'Could not create account',
+
+  // ─── Lobby ───────────────────────────────────────────────────────────────
+  'lobby.title': 'Open Rooms',
+  'lobby.createRoom': 'Create Room',
+  'lobby.joinByCode': 'Join by Code',
+  'lobby.playVsBots': 'Play vs Computer',
+  'lobby.refresh': 'Refresh',
+  'lobby.empty': 'No open rooms right now. Create one or play against bots.',
+  'lobby.players': '{{n}} players',
+  'lobby.host': 'Host',
+  'lobby.open': 'Open',
+  'lobby.join': 'Join',
+  'lobby.leaderboard': 'Leaderboard',
+  'lobby.history': 'History',
+  'lobby.scores': 'Scores',
+  'lobby.profile': 'Profile',
+  'lobby.signOut': 'Sign out',
+
+  // ─── Room create/join ────────────────────────────────────────────────────
+  'rooms.create.title': 'Create a room',
+  'rooms.create.headerTitle': 'Create Room',
+  'rooms.create.subtitle': 'Choose your mode, then start a game.',
+  'rooms.create.connecting': 'Connecting to game server…',
+  'rooms.create.notConnected': 'Not connected to the game server. Please wait or refresh the page.',
+  'rooms.create.timeout': 'Room creation timed out. Check your connection and try again.',
+  'rooms.create.mode': 'Mode',
+  'rooms.create.modeMultiplayer': 'Multiplayer',
+  'rooms.create.modeMultiplayerSub': 'Invite friends with a 6-letter code',
+  'rooms.create.modeVsBots': 'Play vs Computer',
+  'rooms.create.modeVsBotsSub': '1 human + 1 bot · starts immediately',
+  'rooms.create.maxPlayers': 'Max Players',
+  'rooms.create.gameEndsAt': '{{n}} players · game ends at {{score}} pts',
+  'rooms.create.fillWithBots': 'Fill empty seats with bots (start without waiting)',
+  'rooms.create.botDifficulty': 'Bot difficulty',
+  'rooms.create.howItWorksTitle': 'How it works',
+  'rooms.create.howItWorksMulti': "After creating the room you'll get a 6-character code to share. Game starts when all players ready up.",
+  'rooms.create.howItWorksVsBot': 'You play heads-up against an Easy bot. Click Ready in the room to start the game immediately.',
+  'rooms.create.submit': 'Create Room',
+  'rooms.create.submitVsBot': 'Start vs Computer',
+  'rooms.create.creating': 'Creating…',
+  'rooms.create.backToLobby': '← Lobby',
+
+  'rooms.join.title': 'Join a room',
+  'rooms.join.headerTitle': 'Join by Code',
+  'rooms.join.heading': 'Enter Room Code',
+  'rooms.join.helper': 'Ask the room host for their 6-character code.',
+  'rooms.join.codeLabel': 'Room Code',
+  'rooms.join.codePlaceholder': 'ABCD12',
+  'rooms.join.charCount': '{{n}}/6 characters',
+  'rooms.join.submit': 'Join Room',
+  'rooms.join.joining': 'Joining…',
+
+  // ─── Waiting room ────────────────────────────────────────────────────────
+  'waiting.title': 'Waiting Room',
+  'waiting.shareCode': 'Share this code with friends',
+  'waiting.copyCode': '⎘ Copy code',
+  'waiting.copyLink': '🔗 Copy link',
+  'waiting.copied': '✓ Copied',
+  'waiting.youAreHost': 'You are the host. Start the game when everyone is ready.',
+  'waiting.youAreGuest': "Waiting for the host to start the game.",
+  'waiting.ready': '✓ Ready',
+  'waiting.waiting': 'Waiting',
+  'waiting.markReady': '✓ Ready up',
+  'waiting.unready': 'Unready',
+  'waiting.disconnected': 'disconnected',
+  'waiting.startGame': 'Start game',
+  'waiting.addBot': '🤖 Add Easy Bot',
+  'waiting.removeBot': 'Remove bot',
+  'waiting.leave': 'Leave',
+  'waiting.players': 'Players ({{n}}/{{max}})',
+  'waiting.needToStart': 'Need {{min}}–{{max}} to start',
+  'waiting.allReady': 'All players ready — game will start automatically!',
+  'waiting.waitingForReady': 'Waiting for all players to ready up',
+  'waiting.needAtLeast': '· need at least {{n}} players',
+  'waiting.host': 'Host',
+  'waiting.bot': 'BOT',
+  'waiting.you': '(you)',
+  'waiting.empty': 'Empty slot',
+
+  // ─── Game board: header / status ─────────────────────────────────────────
+  'game.round': 'Round {{n}}',
+  'game.deck': 'Deck',
+  'game.deckLeft': '{{n}} left',
+  'game.scores': '📊 Scores',
+  'game.leave': 'Leave',
+  'game.yourTurn': 'Your turn',
+  'game.opponentTurn': "{{name}}'s turn",
+  'game.botThinking': '{{name}} is thinking…',
+  'game.opponentDeciding': '{{name}} is deciding…',
+
+  // ─── Game board: piles ───────────────────────────────────────────────────
+  'game.drawPile': 'Draw pile',
+  'game.discardPile': 'Discard',
+  'game.draw': 'Draw',
+  'game.inspect': 'Inspect',
+  'game.empty': 'empty',
+
+  // ─── Game board: my section ──────────────────────────────────────────────
+  'game.myMelds': 'My melds',
+  'game.noMelds': 'No melds placed',
+  'game.down': 'DOWN',
+  'game.needPts': 'need ≥{{n}} pts',
+  'game.handTitle': 'Hand',
+  'game.handCount': 'Hand ({{n}})',
+  'game.handSelected': '{{n}} selected · {{pts}} pts',
+  'game.noCards': 'No cards in hand',
+  'game.sort.reset': 'Reset',
+  'game.sort.rank': 'Rank',
+  'game.sort.suit': 'Suit',
+  'game.sort.melds': 'Group Melds',
+
+  // ─── Pending drawn-card decision ─────────────────────────────────────────
+  'game.drawn.title': 'You drew this card',
+  'game.drawn.help': 'Keep it (then discard one card from hand to end your turn) or discard it directly to the pile.',
+  'game.drawn.keep': '✓ Keep',
+  'game.drawn.discard': '✕ Discard',
+  'game.drawn.opponentDeciding': '{{name}} drew a card and is deciding…',
+  'game.drawn.discardDirect': 'Send the drawn card straight to the discard pile and end your turn',
+
+  // ─── Action bar ─────────────────────────────────────────────────────────
+  'game.action.drawFromDeck': 'Draw from deck',
+  'game.action.takeFromDiscard': 'Take from discard…',
+  'game.action.openInspector': 'Open pile inspector to take cards',
+  'game.action.waitingFor': 'Waiting for {{name}}…',
+  'game.action.extendableHint': '✨ {{count}} can be extended — click the highlighted meld above',
+  'game.action.extendable.one': '1 meld',
+  'game.action.extendable.many': '{{n}} melds',
+
+  // ─── Go-down builder popup ──────────────────────────────────────────────
+  'game.goDown.title': 'Go Down',
+  'game.goDown.totals': '{{got}} / {{need}} pts',
+  'game.goDown.finishHand': '• finish hand!',
+  'game.goDown.cancel': '✕ Cancel',
+  'game.goDown.selectedMelds': 'Selected melds',
+  'game.goDown.pickFromHand': 'Pick cards from your hand below',
+  'game.goDown.cardsSelected': '{{n}} selected ({{pts}} pts)',
+  'game.goDown.validSequenceOrSet': '✓ valid sequence or set',
+  'game.goDown.validSequence': '✓ valid sequence',
+  'game.goDown.validSet': '✓ valid set',
+  'game.goDown.invalidMeld': '✗ not a valid meld',
+  'game.goDown.addSet': '+ Set',
+  'game.goDown.addSequence': '+ Sequence',
+  'game.goDown.submit': 'Submit ({{pts}} pts)',
+  'game.goDown.submitting': 'Submitting…',
+  'game.goDown.finishWin': 'Finish & win ({{pts}} pts)',
+  'game.goDown.tipNeed': 'Need {{need}} pts (or use all but one card to finish your hand)',
+  'game.goDown.tipFinish': 'Below threshold, but this go-down empties your hand — round will end with +20 bonus',
+
+  // ─── New meld panel (after going down) ──────────────────────────────────
+  'game.newMeld.title': 'New Meld',
+  'game.newMeld.submitSet': 'Submit as Set',
+  'game.newMeld.submitSequence': 'Submit as Sequence',
+
+  // ─── Add-to-meld panel ──────────────────────────────────────────────────
+  'game.addToMeld.prompt': 'Select cards from hand, then click a meld above',
+  'game.addToMeld.selected': '{{n}} cards selected — click a meld above',
+  'game.addToMeld.submitting': 'Submitting…',
+
+  // ─── Take-all return panel ──────────────────────────────────────────────
+  'game.takeAll.banner': 'Taking all {{n}} — pick ANY card to put back on the pile.',
+  'game.takeAll.tip': 'You may return one of your existing hand cards or one of the cards you just picked up from the pile (shown below in the “picked up” strip). Your turn ends as soon as you click.',
+  'game.takeAll.pickedUp': 'Just picked up — click any card to put it back on the pile:',
+
+  // ─── Action bar ─────────────────────────────────────────────────────────
+  'game.action.goDown': 'Go down (≥{{n}} pts)',
+  'game.action.newMeld': '+ New meld',
+  'game.action.addToMeld': 'Add to meld',
+  'game.action.discard': 'Discard ✓',
+  'game.action.discardSelectOne': 'Discard (select 1)',
+  'game.action.discarding': 'Discarding…',
+
+  // ─── Discard inspector ──────────────────────────────────────────────────
+  'discard.title': 'Discard pile ({{n}})',
+  'discard.viewGrouped': 'Grouped',
+  'discard.viewOrder': 'Order',
+  'discard.modeLeaveOne': 'Take all + leave one card on the ground',
+  'discard.modeReturnFromHand': 'Take all + return one card from hand',
+  'discard.tipLeaveOne': 'Leave-one: pick any card from the pile to stay on the ground; every other pile card moves into your hand. No follow-up discard needed.',
+  'discard.tipReturn': 'Take-all + return: the whole pile moves into your hand and you put one card back on the pile. The returned card can be one you originally held or one you just picked up.',
+  'discard.tipOnlyOne': 'With only 1 card on the pile, take-all + return is the only legal pickup.',
+  'discard.tipTurnEnds': 'Either action ends your turn — you cannot go down or extend a meld this turn.',
+  'discard.cantTakeNow': 'You can only take from the discard pile during the draw phase of your turn.',
+  'discard.empty': 'Pile is empty.',
+  'discard.pickHint': 'Pick one card to leave on the pile. Every other discard card will move into your hand. The card you click stays on the ground.',
+  'discard.confirmStay': 'Confirm: this card stays on the ground.',
+  'discard.clickAbove': 'Click a card above to select it.',
+  'discard.confirmTake': 'Confirm — take the rest',
+  'discard.pickFirst': 'Pick a card first',
+  'discard.legendTop': 'top — most recent',
+  'discard.legendBottom': 'bottom — oldest card on the pile',
+
+  // ─── Joker assignment picker ────────────────────────────────────────────
+  'joker.pickerTitle': 'What does the joker represent?',
+  'joker.pickerHint': 'The joker could fill more than one position in this meld. Choose which card it should stand in for. (You can replace it later with the real card if you draw it.)',
+
+  // ─── Round result + scoring ─────────────────────────────────────────────
+  'round.title': 'Round {{n}} Result',
+  'round.finisher': '{{name}} emptied their hand!',
+  'round.deckExhausted': 'Draw pile exhausted',
+  'round.bonus': '+20',
+  'round.nextDealer': 'Next dealer:',
+  'round.nextRoundIn': 'Round {{n}} starts in a few seconds…',
+  'round.dismiss': 'Dismiss',
+  'round.cumulative': 'Cumulative',
+  'round.scoresSubmitted': 'Round score submitted',
+
+  // ─── Scores panel ──────────────────────────────────────────────────────
+  'scores.title': 'Scores',
+  'scores.target': 'Round {{n}} · target {{score}} pts',
+  'scores.empty': 'No players in this game.',
+  'scores.leader': '★ LEADER',
+  'scores.turn': '▶ Turn',
+  'scores.dealer': '🃏 Dealer',
+  'scores.notOpened': 'not opened',
+  'scores.openedFor': 'DOWN · {{n}} pts',
+  'scores.rounds': 'Rounds:',
+  'scores.firstToWin': 'First player to reach {{score}} pts wins the game.',
+
+  // ─── Game finished ──────────────────────────────────────────────────────
+  'game.youWin': 'You Win!',
+  'game.opponentWins': '{{name}} wins!',
+  'game.finalScore': 'Final score:',
+  'game.backToLobby': 'Back to Lobby',
+
+  // ─── Errors / banners ───────────────────────────────────────────────────
+  'error.notInRoom': 'You are not in a room.',
+  'error.connectionLost': 'Connection lost. Trying to reconnect…',
+};

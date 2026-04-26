@@ -6,6 +6,8 @@ import { useRouter } from 'next/navigation';
 import { AuthGuard } from '@/lib/auth-guard';
 import { useAuth } from '@/lib/auth-context';
 import { useGame } from '@/lib/game-context';
+import { useT } from '@/lib/i18n';
+import { LanguageSwitcher } from '@/components/LanguageSwitcher';
 import { apiClient } from '@/lib/api';
 import type { GameRoom } from '@calash/shared';
 
@@ -13,6 +15,7 @@ function LobbyInner() {
   const { user, logout } = useAuth();
   const { room, connected, createRoom, roomError } = useGame();
   const router = useRouter();
+  const t = useT();
 
   const [rooms, setRooms] = useState<GameRoom[]>([]);
   const [loadingRooms, setLoadingRooms] = useState(true);
@@ -60,39 +63,39 @@ function LobbyInner() {
         <span style={{ fontWeight: 800, fontSize: '1.1rem', color: 'var(--accent)' }}>Calash</span>
         <div style={{ flex: 1 }} />
         <div className="row" style={{ gap: 12 }}>
-          {!connected && <span className="badge badge-warning">connecting…</span>}
+          <LanguageSwitcher />
+          {!connected && <span className="badge badge-warning">{t('common.loading')}</span>}
           <Link href="/profile" className="row" style={{ gap: 8, textDecoration: 'none', color: 'inherit' }}>
             <div className="avatar" style={{ width: 28, height: 28, fontSize: '0.75rem' }}>
               {(user?.displayName || user?.username || '?').charAt(0).toUpperCase()}
             </div>
             <span style={{ fontSize: '0.9rem' }} className="hide-mobile">
               {user?.displayName || user?.username}
-              {user?.isGuest && <span style={{ color: 'var(--text-secondary)', fontWeight: 400 }}> (guest)</span>}
+              {user?.isGuest && <span style={{ color: 'var(--text-secondary)', fontWeight: 400 }}> ({t('common.you')})</span>}
             </span>
           </Link>
           <button className="btn btn-ghost btn-sm" onClick={() => { logout(); router.push('/'); }}>
-            Sign out
+            {t('lobby.signOut')}
           </button>
         </div>
       </header>
 
       <div className="page-content">
         <div className="row" style={{ gap: 12, marginBottom: '1.5rem', flexWrap: 'wrap' }}>
-          <Link href="/rooms/create" className="btn btn-primary btn-lg">+ Create Room</Link>
-          <Link href="/rooms/join" className="btn btn-ghost btn-lg">Join by Code</Link>
+          <Link href="/rooms/create" className="btn btn-primary btn-lg">+ {t('lobby.createRoom')}</Link>
+          <Link href="/rooms/join" className="btn btn-ghost btn-lg">{t('lobby.joinByCode')}</Link>
           <button
             onClick={startVsComputer}
             disabled={!connected || startingVsBot}
             className="btn btn-ghost btn-lg"
-            title="Start a heads-up game against an Easy bot"
+            title={t('lobby.playVsBots')}
           >
-            {startingVsBot ? <><span className="spinner" />Starting…</> : '🤖 Play vs Computer'}
+            {startingVsBot ? <><span className="spinner" />{t('common.loading')}</> : `🤖 ${t('lobby.playVsBots')}`}
           </button>
         </div>
 
         <div className="row" style={{ justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-          <h2 style={{ fontWeight: 700, fontSize: '1rem' }}>Open Rooms</h2>
-          <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>auto-refresh 8s</span>
+          <h2 style={{ fontWeight: 700, fontSize: '1rem' }}>{t('lobby.title')}</h2>
         </div>
 
         {fetchError && <div className="error-banner" style={{ marginBottom: '1rem' }}>{fetchError}</div>}
@@ -104,7 +107,7 @@ function LobbyInner() {
         ) : openRooms.length === 0 ? (
           <div className="surface" style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '2.5rem 1rem' }}>
             <div style={{ fontSize: '2.5rem', marginBottom: 8 }}>🃏</div>
-            No open rooms. Be the first to create one!
+            {t('lobby.empty')}
           </div>
         ) : (
           <div className="col" style={{ gap: '0.6rem' }}>
@@ -115,15 +118,15 @@ function LobbyInner() {
                     <span className="room-code" style={{ fontSize: '0.9rem', letterSpacing: '0.15em', padding: '2px 8px' }}>
                       {r.code}
                     </span>
-                    <span className="badge badge-success">Open</span>
+                    <span className="badge badge-success">{t('lobby.open')}</span>
                   </div>
                   <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                    {r.players.length}/{r.maxPlayers} players
+                    {r.players.length}/{r.maxPlayers} {t('lobby.players', { n: r.players.length })}
                     {r.players.length > 0 && ` · ${r.players.map((p) => p.displayName).join(', ')}`}
                   </div>
                 </div>
                 <Link href={`/rooms/${r.id}`} className="btn btn-primary btn-sm" style={{ flexShrink: 0 }}>
-                  Join →
+                  {t('lobby.join')} →
                 </Link>
               </div>
             ))}
@@ -131,10 +134,10 @@ function LobbyInner() {
         )}
 
         <div className="row" style={{ marginTop: '2rem', gap: 20, justifyContent: 'center' }}>
-          <Link href="/leaderboard" style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Leaderboard</Link>
-          <Link href="/history" style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>History</Link>
-          <Link href="/scores" style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Scores</Link>
-          <Link href="/profile" style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Profile</Link>
+          <Link href="/leaderboard" style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{t('lobby.leaderboard')}</Link>
+          <Link href="/history" style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{t('lobby.history')}</Link>
+          <Link href="/scores" style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{t('lobby.scores')}</Link>
+          <Link href="/profile" style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{t('lobby.profile')}</Link>
         </div>
       </div>
     </div>

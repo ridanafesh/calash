@@ -1,5 +1,6 @@
 'use client';
 
+import { useT } from '@/lib/i18n';
 import type { HandSortMode } from './hand-sort';
 
 interface HandToolbarProps {
@@ -10,32 +11,27 @@ interface HandToolbarProps {
   selectedPoints: number;
 }
 
-interface OptionDef {
-  value: HandSortMode;
-  label: string;
-  title: string;
-}
-
-const OPTIONS: OptionDef[] = [
-  { value: 'original', label: 'Reset', title: 'Original (server) order' },
-  { value: 'rank', label: 'Rank', title: 'Sort by rank, low to high' },
-  { value: 'suit', label: 'Suit', title: 'Group by suit, then by rank' },
-  { value: 'melds', label: 'Group Melds', title: 'Cluster cards into likely sets and sequences' },
-];
-
 export function HandToolbar({ mode, onChange, cardCount, selectedCount, selectedPoints }: HandToolbarProps) {
+  const t = useT();
+  const options: Array<{ value: HandSortMode; label: string }> = [
+    { value: 'original', label: t('game.sort.reset') },
+    { value: 'rank', label: t('game.sort.rank') },
+    { value: 'suit', label: t('game.sort.suit') },
+    { value: 'melds', label: t('game.sort.melds') },
+  ];
+
   return (
-    <div className="hand-toolbar" role="toolbar" aria-label="Hand sorting">
+    <div className="hand-toolbar" role="toolbar">
       <div className="hand-toolbar-info">
-        Hand ({cardCount})
+        {t('game.handCount', { n: cardCount })}
         {selectedCount > 0 && (
           <span className="hand-toolbar-selected">
-            {selectedCount} selected · {selectedPoints} pts
+            {t('game.handSelected', { n: selectedCount, pts: selectedPoints })}
           </span>
         )}
       </div>
-      <div className="hand-toolbar-actions" role="radiogroup" aria-label="Sort mode">
-        {OPTIONS.map((opt) => {
+      <div className="hand-toolbar-actions" role="radiogroup">
+        {options.map((opt) => {
           const active = mode === opt.value;
           return (
             <button
@@ -43,7 +39,6 @@ export function HandToolbar({ mode, onChange, cardCount, selectedCount, selected
               type="button"
               role="radio"
               aria-checked={active}
-              title={opt.title}
               className={`hand-toolbar-btn ${active ? 'is-active' : ''}`}
               onClick={() => onChange(opt.value)}
             >

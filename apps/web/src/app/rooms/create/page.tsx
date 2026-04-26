@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { AuthGuard } from '@/lib/auth-guard';
 import { useGame } from '@/lib/game-context';
+import { useT } from '@/lib/i18n';
+import { LanguageSwitcher } from '@/components/LanguageSwitcher';
 import { GAME_CONFIG } from '@calash/shared';
 
 const CREATE_TIMEOUT_MS = 8000;
@@ -14,6 +16,7 @@ type RoomMode = 'multiplayer' | 'vs-computer';
 function CreateRoomInner() {
   const { connected, createRoom, room, roomError, clearError } = useGame();
   const router = useRouter();
+  const t = useT();
   const [maxPlayers, setMaxPlayers] = useState(4);
   const [mode, setMode] = useState<RoomMode>('multiplayer');
   const [fillEmptySeats, setFillEmptySeats] = useState(false);
@@ -55,7 +58,7 @@ function CreateRoomInner() {
     setLocalError(null);
 
     if (!connected) {
-      setLocalError('Not connected to the game server. Please wait or refresh the page.');
+      setLocalError(t('rooms.create.notConnected'));
       return;
     }
 
@@ -69,7 +72,7 @@ function CreateRoomInner() {
     clearTimer();
     timeoutRef.current = setTimeout(() => {
       setCreating(false);
-      setLocalError('Room creation timed out. Check your connection and try again.');
+      setLocalError(t('rooms.create.timeout'));
     }, CREATE_TIMEOUT_MS);
   }
 
@@ -78,22 +81,24 @@ function CreateRoomInner() {
   return (
     <div className="page">
       <header className="page-header">
-        <Link href="/lobby" style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>← Lobby</Link>
-        <span style={{ fontWeight: 700 }}>Create Room</span>
-        <div />
+        <Link href="/lobby" style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>{t('rooms.create.backToLobby')}</Link>
+        <span style={{ fontWeight: 700 }}>{t('rooms.create.headerTitle')}</span>
+        <div className="row" style={{ gap: 8 }}>
+          <LanguageSwitcher />
+        </div>
       </header>
 
       <div className="page-content" style={{ maxWidth: 480 }}>
         <div className="surface col" style={{ gap: '1.25rem' }}>
           <div>
-            <h2 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: 4 }}>New Game Room</h2>
+            <h2 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: 4 }}>{t('rooms.create.title')}</h2>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-              Choose your mode, then start a game.
+              {t('rooms.create.subtitle')}
             </p>
           </div>
 
           {!connected && (
-            <div className="info-banner" role="status">Connecting to game server…</div>
+            <div className="info-banner" role="status">{t('rooms.create.connecting')}</div>
           )}
 
           {displayedError && (
@@ -109,21 +114,21 @@ function CreateRoomInner() {
 
           {/* Mode selector */}
           <div className="field">
-            <label className="label">Mode</label>
+            <label className="label">{t('rooms.create.mode')}</label>
             <div className="row" style={{ gap: 8 }}>
               <ModeButton
                 active={mode === 'multiplayer'}
                 onClick={() => setMode('multiplayer')}
                 disabled={creating}
-                title="Multiplayer"
-                subtitle="Invite friends with a 6-letter code"
+                title={t('rooms.create.modeMultiplayer')}
+                subtitle={t('rooms.create.modeMultiplayerSub')}
               />
               <ModeButton
                 active={mode === 'vs-computer'}
                 onClick={() => setMode('vs-computer')}
                 disabled={creating}
-                title="Play vs Computer"
-                subtitle="1 human + 1 bot · starts immediately"
+                title={t('rooms.create.modeVsBots')}
+                subtitle={t('rooms.create.modeVsBotsSub')}
               />
             </div>
           </div>
@@ -131,7 +136,7 @@ function CreateRoomInner() {
           {mode === 'multiplayer' && (
             <>
               <div className="field">
-                <label className="label">Max Players</label>
+                <label className="label">{t('rooms.create.maxPlayers')}</label>
                 <div className="row" style={{ gap: 8 }}>
                   {Array.from(
                     { length: GAME_CONFIG.MAX_PLAYERS - GAME_CONFIG.MIN_PLAYERS + 1 },
@@ -153,7 +158,7 @@ function CreateRoomInner() {
                   ))}
                 </div>
                 <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: 4 }}>
-                  {maxPlayers} players · game ends at {GAME_CONFIG.WIN_SCORE} pts
+                  {t('rooms.create.gameEndsAt', { n: maxPlayers, score: GAME_CONFIG.WIN_SCORE })}
                 </div>
               </div>
 
@@ -166,17 +171,17 @@ function CreateRoomInner() {
                   style={{ width: 18, height: 18, accentColor: 'var(--accent)' }}
                 />
                 <span style={{ fontSize: '0.9rem' }}>
-                  Fill empty seats with bots (start without waiting)
+                  {t('rooms.create.fillWithBots')}
                 </span>
               </label>
             </>
           )}
 
           <div className="surface-sm" style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
-            <div style={{ fontWeight: 600, marginBottom: 4, color: 'var(--text-primary)' }}>How it works</div>
+            <div style={{ fontWeight: 600, marginBottom: 4, color: 'var(--text-primary)' }}>{t('rooms.create.howItWorksTitle')}</div>
             {mode === 'vs-computer'
-              ? <>You play heads-up against an Easy bot. Click Ready in the room to start the game immediately.</>
-              : <>After creating the room you&apos;ll get a 6-character code to share. Game starts when all players ready up.</>}
+              ? t('rooms.create.howItWorksVsBot')
+              : t('rooms.create.howItWorksMulti')}
           </div>
 
           <button
@@ -186,8 +191,8 @@ function CreateRoomInner() {
             style={{ width: '100%' }}
           >
             {creating ? (
-              <><span className="spinner" aria-hidden="true" />Creating…</>
-            ) : mode === 'vs-computer' ? 'Start vs Computer' : 'Create Room'}
+              <><span className="spinner" aria-hidden="true" />{t('rooms.create.creating')}</>
+            ) : mode === 'vs-computer' ? t('rooms.create.submitVsBot') : t('rooms.create.submit')}
           </button>
         </div>
       </div>

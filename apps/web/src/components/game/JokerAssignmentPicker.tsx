@@ -1,6 +1,7 @@
 'use client';
 
 import type { JokerAssignment, Suit } from '@calash/shared';
+import { useT } from '@/lib/i18n';
 
 const SUIT_SYMBOLS: Record<Suit, string> = {
   hearts: '♥',
@@ -33,6 +34,7 @@ interface Props {
  * the player without changing what they intended, so we ask.
  */
 export function JokerAssignmentPicker({ candidates, onChoose, onCancel }: Props) {
+  const t = useT();
   return (
     <div
       role="dialog"
@@ -61,11 +63,10 @@ export function JokerAssignmentPicker({ candidates, onChoose, onCancel }: Props)
         }}
       >
         <h2 id="joker-picker-title" style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700 }}>
-          What does the joker represent?
+          {t('joker.pickerTitle')}
         </h2>
         <p style={{ margin: '8px 0 16px', fontSize: '0.85rem', color: 'var(--text-secondary, #9ca3af)' }}>
-          The joker could fill more than one position in this meld. Choose which card it
-          should stand in for. (You can replace it later with the real card if you draw it.)
+          {t('joker.pickerHint')}
         </p>
 
         <div
@@ -95,7 +96,7 @@ export function JokerAssignmentPicker({ candidates, onChoose, onCancel }: Props)
                 fontWeight: 600,
               }}
             >
-              <span style={{ color: '#d946ef', fontWeight: 700 }}>Joker →</span>
+              <span style={{ color: '#d946ef', fontWeight: 700 }}>🃏 →</span>
               <span style={{ fontSize: '1.1rem' }}>{c.representsRank}</span>
               <span style={{ color: SUIT_COLOR[c.representsSuit], fontSize: '1.2rem' }}>
                 {SUIT_SYMBOLS[c.representsSuit]}
@@ -118,7 +119,7 @@ export function JokerAssignmentPicker({ candidates, onChoose, onCancel }: Props)
               fontSize: '0.85rem',
             }}
           >
-            Cancel
+            {t('common.cancel')}
           </button>
         </div>
       </div>

@@ -6,11 +6,14 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
 import { useAuth } from '@/lib/auth-context';
+import { useT } from '@/lib/i18n';
+import { LanguageSwitcher } from '@/components/LanguageSwitcher';
 
 const GOOGLE_CLIENT_ID = process.env['NEXT_PUBLIC_GOOGLE_CLIENT_ID'] ?? '';
 
 export default function LoginPage() {
   const router = useRouter();
+  const t = useT();
   const { loginWithPassword, loginWithGoogle, loginAsGuest } = useAuth();
 
   const [email, setEmail] = useState('');
@@ -28,14 +31,14 @@ export default function LoginPage() {
       await loginWithPassword(email, password);
       router.push('/lobby');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Login failed');
+      setError(err instanceof Error ? err.message : t('auth.loginFailed'));
       setLoading(null);
     }
   }
 
   async function handleGoogleSuccess(response: { credential?: string }) {
     if (!response.credential) {
-      setError('Google sign-in returned no credential');
+      setError(t('auth.googleNoCredential'));
       return;
     }
     setError('');
@@ -44,7 +47,7 @@ export default function LoginPage() {
       await loginWithGoogle(response.credential);
       router.push('/lobby');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Google sign-in failed');
+      setError(err instanceof Error ? err.message : t('auth.googleFailed'));
       setLoading(null);
     }
   }
@@ -56,17 +59,20 @@ export default function LoginPage() {
       await loginAsGuest();
       router.push('/lobby');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not start guest session');
+      setError(err instanceof Error ? err.message : t('auth.guestFailed'));
       setLoading(null);
     }
   }
 
   return (
     <main className="auth-shell">
+      <div style={{ position: 'absolute', top: 16, right: 16 }}>
+        <LanguageSwitcher />
+      </div>
       <div className="auth-card">
         <header className="auth-header">
-          <h1 className="auth-title">Welcome to Calash</h1>
-          <p className="auth-subtitle">Sign in to play with friends in real time.</p>
+          <h1 className="auth-title">{t('auth.login.title')}</h1>
+          <p className="auth-subtitle">{t('auth.login.subtitle')}</p>
         </header>
 
         {error && (
@@ -79,7 +85,7 @@ export default function LoginPage() {
           <div style={{ display: 'flex', justifyContent: 'center' }}>
             <GoogleLogin
               onSuccess={handleGoogleSuccess}
-              onError={() => setError('Google sign-in failed')}
+              onError={() => setError(t('auth.googleFailed'))}
               text="signin_with"
               shape="rectangular"
               size="large"
@@ -89,16 +95,16 @@ export default function LoginPage() {
           </div>
         ) : null}
 
-        {GOOGLE_CLIENT_ID ? <div className="auth-divider"><span>or</span></div> : null}
+        {GOOGLE_CLIENT_ID ? <div className="auth-divider"><span>{t('auth.divider.or')}</span></div> : null}
 
         <form onSubmit={handlePasswordLogin} className="auth-form" noValidate suppressHydrationWarning>
           <div className="field" suppressHydrationWarning>
-            <label htmlFor="email" className="label">Email</label>
+            <label htmlFor="email" className="label">{t('auth.email')}</label>
             <input
               id="email"
               type="email"
               className="input"
-              placeholder="you@example.com"
+              placeholder={t('auth.emailPlaceholder')}
               autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -108,12 +114,12 @@ export default function LoginPage() {
             />
           </div>
           <div className="field" suppressHydrationWarning>
-            <label htmlFor="password" className="label">Password</label>
+            <label htmlFor="password" className="label">{t('auth.password')}</label>
             <input
               id="password"
               type="password"
               className="input"
-              placeholder="Your password"
+              placeholder={t('auth.passwordPlaceholder')}
               autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -130,15 +136,15 @@ export default function LoginPage() {
             {loading === 'password' ? (
               <>
                 <span className="spinner" aria-hidden="true" />
-                Signing in…
+                {t('auth.signingIn')}
               </>
             ) : (
-              'Sign in'
+              t('auth.signIn')
             )}
           </button>
         </form>
 
-        <div className="auth-divider"><span>or</span></div>
+        <div className="auth-divider"><span>{t('auth.divider.or')}</span></div>
 
         <button
           type="button"
@@ -146,11 +152,11 @@ export default function LoginPage() {
           disabled={isBusy}
           className="btn btn-ghost btn-lg btn-block"
         >
-          {loading === 'guest' ? 'Starting guest session…' : 'Continue as guest'}
+          {loading === 'guest' ? t('auth.startingGuest') : t('auth.continueAsGuest')}
         </button>
 
         <p className="auth-footer">
-          No account? <Link href="/auth/register">Create one</Link>
+          {t('auth.noAccount')} <Link href="/auth/register">{t('auth.createOne')}</Link>
         </p>
       </div>
     </main>

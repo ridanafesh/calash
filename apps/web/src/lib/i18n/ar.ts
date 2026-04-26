@@ -1,0 +1,289 @@
+/**
+ * Arabic translation dictionary. Keys mirror en.ts exactly. When you add
+ * a key to en.ts, add the same key here — missing keys silently fall
+ * back to English at runtime so the app never breaks, but the UI mixes
+ * languages until the gap is closed.
+ *
+ * Numbers and {{variable}} placeholders are kept as Latin / English
+ * shape so the engine's interpolation works the same in both languages.
+ * Arabic punctuation (؟ ،) is used where it matches natural usage.
+ */
+
+export const ar: Record<string, string> = {
+  // ─── Common ──────────────────────────────────────────────────────────────
+  'common.cancel': 'إلغاء',
+  'common.submit': 'إرسال',
+  'common.close': 'إغلاق',
+  'common.dismiss': 'تم',
+  'common.back': 'رجوع',
+  'common.loading': 'جارٍ التحميل…',
+  'common.you': 'أنت',
+  'common.points': 'نقطة',
+
+  // ─── App / language switcher ─────────────────────────────────────────────
+  'lang.en': 'English',
+  'lang.ar': 'العربية',
+  'lang.switchTo': 'تغيير اللغة',
+
+  // ─── Landing page ────────────────────────────────────────────────────────
+  'landing.tagline': 'لعبة ورق متعددة اللاعبين بأسلوب الرامي. كوّن مجموعات، انزل، وكن أول من يصل إلى 1000 نقطة.',
+  'landing.playAsGuest': 'العب كضيف',
+  'landing.createAccount': 'إنشاء حساب →',
+  'landing.feature.realtime': '✓ متعدد اللاعبين بشكل فوري',
+  'landing.feature.players': '✓ من 2 إلى 4 لاعبين',
+  'landing.feature.noDownload': '✓ بدون تنزيل',
+
+  // ─── Auth ────────────────────────────────────────────────────────────────
+  'auth.login.title': 'مرحبًا بك في كَلَش',
+  'auth.login.subtitle': 'سجّل الدخول للعب مع أصدقائك بشكل فوري.',
+  'auth.email': 'البريد الإلكتروني',
+  'auth.emailPlaceholder': 'you@example.com',
+  'auth.password': 'كلمة المرور',
+  'auth.passwordPlaceholder': 'كلمة المرور الخاصة بك',
+  'auth.signIn': 'تسجيل الدخول',
+  'auth.signingIn': 'جارٍ تسجيل الدخول…',
+  'auth.continueAsGuest': 'المتابعة كضيف',
+  'auth.startingGuest': 'جارٍ بدء جلسة الضيف…',
+  'auth.googleFailed': 'فشل تسجيل الدخول عبر جوجل',
+  'auth.googleNoCredential': 'لم يُرجع جوجل بيانات اعتماد',
+  'auth.loginFailed': 'فشل تسجيل الدخول',
+  'auth.guestFailed': 'تعذّر بدء جلسة ضيف',
+  'auth.noAccount': 'ليس لديك حساب؟',
+  'auth.createOne': 'أنشئ واحدًا',
+  'auth.haveAccount': 'لديك حساب بالفعل؟',
+  'auth.divider.or': 'أو',
+
+  'auth.register.title': 'إنشاء حسابك',
+  'auth.username': 'اسم المستخدم',
+  'auth.usernamePlaceholder': 'اختر اسمًا للظهور',
+  'auth.register.submit': 'إنشاء الحساب',
+  'auth.register.submitting': 'جارٍ إنشاء الحساب…',
+  'auth.register.failed': 'تعذّر إنشاء الحساب',
+
+  // ─── Lobby ───────────────────────────────────────────────────────────────
+  'lobby.title': 'الغرف المفتوحة',
+  'lobby.createRoom': 'إنشاء غرفة',
+  'lobby.joinByCode': 'الدخول برمز',
+  'lobby.playVsBots': 'العب ضد الكمبيوتر',
+  'lobby.refresh': 'تحديث',
+  'lobby.empty': 'لا توجد غرف مفتوحة الآن. أنشئ واحدة أو العب ضد الكمبيوتر.',
+  'lobby.players': '{{n}} لاعبون',
+  'lobby.host': 'المضيف',
+  'lobby.open': 'مفتوحة',
+  'lobby.join': 'انضمام',
+  'lobby.leaderboard': 'لوحة الصدارة',
+  'lobby.history': 'السجل',
+  'lobby.scores': 'النتائج',
+  'lobby.profile': 'الملف الشخصي',
+  'lobby.signOut': 'تسجيل الخروج',
+
+  // ─── Room create/join ────────────────────────────────────────────────────
+  'rooms.create.title': 'إنشاء غرفة',
+  'rooms.create.headerTitle': 'إنشاء غرفة',
+  'rooms.create.subtitle': 'اختر الوضع ثم ابدأ اللعبة.',
+  'rooms.create.connecting': 'جارٍ الاتصال بخادم اللعبة…',
+  'rooms.create.notConnected': 'غير متصل بخادم اللعبة. يرجى الانتظار أو تحديث الصفحة.',
+  'rooms.create.timeout': 'انتهت مهلة إنشاء الغرفة. تحقق من اتصالك وحاول مجددًا.',
+  'rooms.create.mode': 'الوضع',
+  'rooms.create.modeMultiplayer': 'متعدد اللاعبين',
+  'rooms.create.modeMultiplayerSub': 'ادعُ أصدقاءك برمز من 6 أحرف',
+  'rooms.create.modeVsBots': 'اللعب ضد الكمبيوتر',
+  'rooms.create.modeVsBotsSub': 'لاعب واحد + كمبيوتر · يبدأ فورًا',
+  'rooms.create.maxPlayers': 'أقصى عدد للاعبين',
+  'rooms.create.gameEndsAt': '{{n}} لاعبون · تنتهي اللعبة عند {{score}} نقطة',
+  'rooms.create.fillWithBots': 'املأ المقاعد الفارغة بالكمبيوتر (ابدأ دون انتظار)',
+  'rooms.create.botDifficulty': 'مستوى صعوبة الكمبيوتر',
+  'rooms.create.howItWorksTitle': 'كيف تعمل',
+  'rooms.create.howItWorksMulti': 'بعد إنشاء الغرفة ستحصل على رمز من 6 أحرف لمشاركته. تبدأ اللعبة عندما يكون جميع اللاعبين جاهزين.',
+  'rooms.create.howItWorksVsBot': 'تلعب وجهًا لوجه ضد كمبيوتر بمستوى سهل. اضغط جاهز في الغرفة لبدء اللعبة فورًا.',
+  'rooms.create.submit': 'إنشاء الغرفة',
+  'rooms.create.submitVsBot': 'ابدأ ضد الكمبيوتر',
+  'rooms.create.creating': 'جارٍ الإنشاء…',
+  'rooms.create.backToLobby': '← الردهة',
+
+  'rooms.join.title': 'الانضمام لغرفة',
+  'rooms.join.headerTitle': 'الدخول برمز',
+  'rooms.join.heading': 'أدخل رمز الغرفة',
+  'rooms.join.helper': 'اطلب من مضيف الغرفة الرمز المكوّن من 6 أحرف.',
+  'rooms.join.codeLabel': 'رمز الغرفة',
+  'rooms.join.codePlaceholder': 'ABCD12',
+  'rooms.join.charCount': '{{n}}/6 أحرف',
+  'rooms.join.submit': 'الانضمام',
+  'rooms.join.joining': 'جارٍ الانضمام…',
+
+  // ─── Waiting room ────────────────────────────────────────────────────────
+  'waiting.title': 'غرفة الانتظار',
+  'waiting.shareCode': 'شارك هذا الرمز مع أصدقائك',
+  'waiting.copyCode': '⎘ نسخ الرمز',
+  'waiting.copyLink': '🔗 نسخ الرابط',
+  'waiting.copied': '✓ تم النسخ',
+  'waiting.youAreHost': 'أنت المضيف. ابدأ اللعبة عندما يكون الجميع جاهزًا.',
+  'waiting.youAreGuest': 'في انتظار المضيف لبدء اللعبة.',
+  'waiting.ready': '✓ جاهز',
+  'waiting.waiting': 'في الانتظار',
+  'waiting.markReady': '✓ أنا جاهز',
+  'waiting.unready': 'لست جاهزًا',
+  'waiting.disconnected': 'غير متصل',
+  'waiting.startGame': 'ابدأ اللعبة',
+  'waiting.addBot': '🤖 أضف كمبيوتر سهل',
+  'waiting.removeBot': 'إزالة الكمبيوتر',
+  'waiting.leave': 'مغادرة',
+  'waiting.players': 'اللاعبون ({{n}}/{{max}})',
+  'waiting.needToStart': 'تحتاج {{min}}–{{max}} للبدء',
+  'waiting.allReady': 'كل اللاعبين جاهزون — ستبدأ اللعبة تلقائيًا!',
+  'waiting.waitingForReady': 'في انتظار جاهزية جميع اللاعبين',
+  'waiting.needAtLeast': '· تحتاج على الأقل {{n}} لاعبين',
+  'waiting.host': 'المضيف',
+  'waiting.bot': 'كمبيوتر',
+  'waiting.you': '(أنت)',
+  'waiting.empty': 'مقعد فارغ',
+
+  // ─── Game board: header / status ─────────────────────────────────────────
+  'game.round': 'الجولة {{n}}',
+  'game.deck': 'الكوتشينة',
+  'game.deckLeft': 'متبقي {{n}}',
+  'game.scores': '📊 النتائج',
+  'game.leave': 'مغادرة',
+  'game.yourTurn': 'دورك',
+  'game.opponentTurn': 'دور {{name}}',
+  'game.botThinking': '{{name}} يفكر…',
+  'game.opponentDeciding': '{{name}} يقرر…',
+
+  // ─── Game board: piles ───────────────────────────────────────────────────
+  'game.drawPile': 'كومة السحب',
+  'game.discardPile': 'كومة الرمي',
+  'game.draw': 'اسحب',
+  'game.inspect': 'استعرض',
+  'game.empty': 'فارغة',
+
+  // ─── Game board: my section ──────────────────────────────────────────────
+  'game.myMelds': 'مجموعاتي',
+  'game.noMelds': 'لم يتم إنزال أي مجموعة',
+  'game.down': 'نازل',
+  'game.needPts': 'تحتاج ≥{{n}} نقطة',
+  'game.handTitle': 'يدك',
+  'game.handCount': 'يدك ({{n}})',
+  'game.handSelected': '{{n}} مختارة · {{pts}} نقطة',
+  'game.noCards': 'لا توجد بطاقات في يدك',
+  'game.sort.reset': 'إعادة',
+  'game.sort.rank': 'الرتبة',
+  'game.sort.suit': 'الشكل',
+  'game.sort.melds': 'تجميع المجموعات',
+
+  // ─── Pending drawn-card decision ─────────────────────────────────────────
+  'game.drawn.title': 'سحبت هذه البطاقة',
+  'game.drawn.help': 'احتفظ بها (ثم ارمِ بطاقة من يدك لإنهاء دورك) أو ارمها مباشرة إلى الكومة.',
+  'game.drawn.keep': '✓ احتفظ',
+  'game.drawn.discard': '✕ ارمِ',
+  'game.drawn.opponentDeciding': '{{name}} سحب بطاقة ويقرر…',
+  'game.drawn.discardDirect': 'أرسل البطاقة المسحوبة مباشرة إلى كومة الرمي وأنهِ دورك',
+
+  // ─── Action bar ─────────────────────────────────────────────────────────
+  'game.action.drawFromDeck': 'اسحب من الكومة',
+  'game.action.takeFromDiscard': 'خذ من الرمي…',
+  'game.action.openInspector': 'افتح متصفح الكومة لأخذ البطاقات',
+  'game.action.waitingFor': 'في انتظار {{name}}…',
+  'game.action.extendableHint': '✨ {{count}} يمكن توسيعها — اضغط على المجموعة المظللة أعلاه',
+  'game.action.extendable.one': 'مجموعة واحدة',
+  'game.action.extendable.many': '{{n}} مجموعات',
+
+  // ─── Go-down builder popup ──────────────────────────────────────────────
+  'game.goDown.title': 'النزول',
+  'game.goDown.totals': '{{got}} / {{need}} نقطة',
+  'game.goDown.finishHand': '• ستنهي يدك!',
+  'game.goDown.cancel': '✕ إلغاء',
+  'game.goDown.selectedMelds': 'المجموعات المختارة',
+  'game.goDown.pickFromHand': 'اختر بطاقات من يدك في الأسفل',
+  'game.goDown.cardsSelected': 'تم اختيار {{n}} ({{pts}} نقطة)',
+  'game.goDown.validSequenceOrSet': '✓ متتالية أو مجموعة صالحة',
+  'game.goDown.validSequence': '✓ متتالية صالحة',
+  'game.goDown.validSet': '✓ مجموعة صالحة',
+  'game.goDown.invalidMeld': '✗ ليست مجموعة صالحة',
+  'game.goDown.addSet': '+ مجموعة',
+  'game.goDown.addSequence': '+ متتالية',
+  'game.goDown.submit': 'إرسال ({{pts}} نقطة)',
+  'game.goDown.submitting': 'جارٍ الإرسال…',
+  'game.goDown.finishWin': 'أنهِ والفز ({{pts}} نقطة)',
+  'game.goDown.tipNeed': 'تحتاج {{need}} نقطة (أو استخدم كل بطاقاتك ما عدا واحدة لإنهاء يدك)',
+  'game.goDown.tipFinish': 'أقل من الحد المطلوب، لكن هذا النزول يُفرغ يدك — ستنتهي الجولة بمكافأة +20',
+
+  // ─── New meld panel (after going down) ──────────────────────────────────
+  'game.newMeld.title': 'مجموعة جديدة',
+  'game.newMeld.submitSet': 'أرسل كمجموعة',
+  'game.newMeld.submitSequence': 'أرسل كمتتالية',
+
+  // ─── Add-to-meld panel ──────────────────────────────────────────────────
+  'game.addToMeld.prompt': 'اختر بطاقات من يدك ثم اضغط على مجموعة في الأعلى',
+  'game.addToMeld.selected': 'تم اختيار {{n}} بطاقات — اضغط على مجموعة في الأعلى',
+  'game.addToMeld.submitting': 'جارٍ الإرسال…',
+
+  // ─── Take-all return panel ──────────────────────────────────────────────
+  'game.takeAll.banner': 'أخذ الكل {{n}} — اختر أي بطاقة لإعادتها للكومة.',
+  'game.takeAll.tip': 'يمكنك إرجاع إحدى بطاقاتك الأصلية أو إحدى البطاقات التي التقطتها للتو من الكومة (تظهر بالأسفل في شريط "الملتقطة"). ينتهي دورك فور الضغط.',
+  'game.takeAll.pickedUp': 'الملتقطة للتو — اضغط على أي بطاقة لإعادتها للكومة:',
+
+  // ─── Action bar ─────────────────────────────────────────────────────────
+  'game.action.goDown': 'انزل (≥{{n}} نقطة)',
+  'game.action.newMeld': '+ مجموعة جديدة',
+  'game.action.addToMeld': 'أضف لمجموعة',
+  'game.action.discard': 'ارمِ ✓',
+  'game.action.discardSelectOne': 'ارمِ (اختر واحدة)',
+  'game.action.discarding': 'جارٍ الرمي…',
+
+  // ─── Discard inspector ──────────────────────────────────────────────────
+  'discard.title': 'كومة الرمي ({{n}})',
+  'discard.viewGrouped': 'مجمّع',
+  'discard.viewOrder': 'بالترتيب',
+  'discard.modeLeaveOne': 'خذ الكل + اترك بطاقة واحدة على الأرض',
+  'discard.modeReturnFromHand': 'خذ الكل + أعِد بطاقة من يدك',
+  'discard.tipLeaveOne': 'اترك واحدة: اختر أي بطاقة من الكومة لتبقى على الأرض؛ كل البطاقات الأخرى تنتقل إلى يدك. لا حاجة للرمي بعدها.',
+  'discard.tipReturn': 'خذ الكل + أعِد: تنتقل الكومة بأكملها إلى يدك ثم تعيد بطاقة واحدة إلى الكومة. البطاقة المعادة قد تكون مما كان معك أو مما التقطته للتو.',
+  'discard.tipOnlyOne': 'مع وجود بطاقة واحدة فقط على الكومة، الالتقاط الوحيد المسموح به هو "خذ الكل + أعِد".',
+  'discard.tipTurnEnds': 'كلا الإجراءين ينهيان دورك — لا يمكنك النزول أو إضافة بطاقات لمجموعة في هذا الدور.',
+  'discard.cantTakeNow': 'يمكنك الأخذ من كومة الرمي فقط أثناء مرحلة السحب من دورك.',
+  'discard.empty': 'الكومة فارغة.',
+  'discard.pickHint': 'اختر بطاقة واحدة لتبقى على الكومة. كل البطاقات الأخرى ستنتقل إلى يدك. البطاقة التي تضغط عليها تبقى على الأرض.',
+  'discard.confirmStay': 'تأكيد: هذه البطاقة تبقى على الأرض.',
+  'discard.clickAbove': 'اضغط على بطاقة في الأعلى لاختيارها.',
+  'discard.confirmTake': 'تأكيد — خذ الباقي',
+  'discard.pickFirst': 'اختر بطاقة أولاً',
+  'discard.legendTop': 'الأعلى — أحدث رمية',
+  'discard.legendBottom': 'الأسفل — أقدم بطاقة على الكومة',
+
+  // ─── Joker assignment picker ────────────────────────────────────────────
+  'joker.pickerTitle': 'ماذا يمثل الجوكر؟',
+  'joker.pickerHint': 'يمكن للجوكر أن يملأ أكثر من موقع في هذه المجموعة. اختر البطاقة التي يحل محلها. (يمكنك استبداله لاحقًا بالبطاقة الحقيقية إذا سحبتها.)',
+
+  // ─── Round result + scoring ─────────────────────────────────────────────
+  'round.title': 'نتيجة الجولة {{n}}',
+  'round.finisher': '{{name}} أنهى يده!',
+  'round.deckExhausted': 'انتهت كومة السحب',
+  'round.bonus': '+20',
+  'round.nextDealer': 'الموزع التالي:',
+  'round.nextRoundIn': 'تبدأ الجولة {{n}} خلال ثوانٍ…',
+  'round.dismiss': 'تم',
+  'round.cumulative': 'النقاط التراكمية',
+  'round.scoresSubmitted': 'تم تسجيل نتيجة الجولة',
+
+  // ─── Scores panel ──────────────────────────────────────────────────────
+  'scores.title': 'النتائج',
+  'scores.target': 'الجولة {{n}} · الهدف {{score}} نقطة',
+  'scores.empty': 'لا يوجد لاعبون في هذه اللعبة.',
+  'scores.leader': '★ المتصدر',
+  'scores.turn': '▶ دوره',
+  'scores.dealer': '🃏 الموزع',
+  'scores.notOpened': 'لم يفتح بعد',
+  'scores.openedFor': 'نازل · {{n}} نقطة',
+  'scores.rounds': 'الجولات:',
+  'scores.firstToWin': 'أول لاعب يصل إلى {{score}} نقطة يفوز باللعبة.',
+
+  // ─── Game finished ──────────────────────────────────────────────────────
+  'game.youWin': 'لقد فزت!',
+  'game.opponentWins': '{{name}} فاز!',
+  'game.finalScore': 'النتيجة النهائية:',
+  'game.backToLobby': 'العودة إلى الردهة',
+
+  // ─── Errors / banners ───────────────────────────────────────────────────
+  'error.notInRoom': 'أنت لست في غرفة.',
+  'error.connectionLost': 'انقطع الاتصال. جارٍ إعادة الاتصال…',
+};

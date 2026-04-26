@@ -5,9 +5,12 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
 import { useAuth } from '@/lib/auth-context';
+import { useT } from '@/lib/i18n';
+import { LanguageSwitcher } from '@/components/LanguageSwitcher';
 
 export default function RegisterPage() {
   const router = useRouter();
+  const t = useT();
   const { loginWithPassword } = useAuth();
 
   const [username, setUsername] = useState('');
@@ -26,17 +29,20 @@ export default function RegisterPage() {
       await loginWithPassword(email, password);
       router.push('/lobby');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Registration failed');
+      setError(err instanceof Error ? err.message : t('auth.register.failed'));
       setLoading(false);
     }
   }
 
   return (
     <main className="auth-shell">
+      <div style={{ position: 'absolute', top: 16, right: 16 }}>
+        <LanguageSwitcher />
+      </div>
       <form onSubmit={handleSubmit} className="auth-card" noValidate suppressHydrationWarning>
         <header className="auth-header">
-          <h1 className="auth-title">Create your account</h1>
-          <p className="auth-subtitle">Pick a username and start playing.</p>
+          <h1 className="auth-title">{t('auth.register.title')}</h1>
+          <p className="auth-subtitle">{t('auth.usernamePlaceholder')}</p>
         </header>
 
         {error && (
@@ -46,12 +52,12 @@ export default function RegisterPage() {
         )}
 
         <div className="field" suppressHydrationWarning>
-          <label htmlFor="username" className="label">Username</label>
+          <label htmlFor="username" className="label">{t('auth.username')}</label>
           <input
             id="username"
             type="text"
             className="input"
-            placeholder="letters, numbers, _"
+            placeholder={t('auth.usernamePlaceholder')}
             autoComplete="username"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
@@ -63,12 +69,12 @@ export default function RegisterPage() {
         </div>
 
         <div className="field" suppressHydrationWarning>
-          <label htmlFor="email" className="label">Email</label>
+          <label htmlFor="email" className="label">{t('auth.email')}</label>
           <input
             id="email"
             type="email"
             className="input"
-            placeholder="you@example.com"
+            placeholder={t('auth.emailPlaceholder')}
             autoComplete="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
@@ -78,12 +84,12 @@ export default function RegisterPage() {
         </div>
 
         <div className="field" suppressHydrationWarning>
-          <label htmlFor="password" className="label">Password</label>
+          <label htmlFor="password" className="label">{t('auth.password')}</label>
           <input
             id="password"
             type="password"
             className="input"
-            placeholder="min 8 characters"
+            placeholder={t('auth.passwordPlaceholder')}
             autoComplete="new-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
@@ -101,15 +107,15 @@ export default function RegisterPage() {
           {loading ? (
             <>
               <span className="spinner" aria-hidden="true" />
-              Creating account…
+              {t('auth.register.submitting')}
             </>
           ) : (
-            'Create account'
+            t('auth.register.submit')
           )}
         </button>
 
         <p className="auth-footer">
-          Already have an account? <Link href="/auth/login">Sign in</Link>
+          {t('auth.haveAccount')} <Link href="/auth/login">{t('auth.signIn')}</Link>
         </p>
       </form>
     </main>
