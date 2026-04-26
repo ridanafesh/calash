@@ -1077,6 +1077,21 @@ a:focus-visible {
   unicode-bidi: isolate;
 }
 
+/* ── Emoji reaction bubble ───────────────────────────────────────────────────
+   Pops in above a player's seat when they send a reaction. The
+   ReactionBubble JSX in GameBoard combines two animations — a quick
+   enter + a delayed fade-out — so the bubble lands fast then
+   gracefully disappears just before its TTL elapses. */
+@keyframes reaction-bubble-in {
+  from { transform: translateY(6px) scale(0.7); opacity: 0; }
+  to   { transform: translateY(0)   scale(1);   opacity: 1; }
+}
+
+@keyframes reaction-bubble-out {
+  from { transform: translateY(0)    scale(1);   opacity: 1; }
+  to   { transform: translateY(-10px) scale(0.85); opacity: 0; }
+}
+
 /* The discard inspector legend chip uses an arrow (→) that has correct
    bidi behavior; nothing to override. */
 

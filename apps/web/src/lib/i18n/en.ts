@@ -285,4 +285,22 @@ export const en: Record<string, string> = {
   // ─── Errors / banners ───────────────────────────────────────────────────
   'error.notInRoom': 'You are not in a room.',
   'error.connectionLost': 'Connection lost. Trying to reconnect…',
+
+  // ─── Emoji reactions ────────────────────────────────────────────────────
+  'reaction.button': 'Send reaction',
+  'reaction.cooldown': 'Wait a moment before reacting again',
+  'reaction.title': 'Quick reaction',
+  // Hover / aria labels per emoji — short, game-friendly.
+  'reaction.happy': 'Happy',
+  'reaction.laughing': 'Laughing',
+  'reaction.angry': 'Angry',
+  'reaction.sad': 'Sad',
+  'reaction.cool': 'Cool',
+  'reaction.thumbsUp': 'Thumbs up',
+  'reaction.thumbsDown': 'Thumbs down',
+  'reaction.surprised': 'Surprised',
+  'reaction.bored': 'Bored',
+  'reaction.fire': 'Hype',
+  'reaction.strong': 'Strong',
+  'reaction.clap': 'Well played',
 };

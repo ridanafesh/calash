@@ -286,4 +286,21 @@ export const ar: Record<string, string> = {
   // ─── Errors / banners ───────────────────────────────────────────────────
   'error.notInRoom': 'أنت لست في غرفة.',
   'error.connectionLost': 'انقطع الاتصال. جارٍ إعادة الاتصال…',
+
+  // ─── Emoji reactions ────────────────────────────────────────────────────
+  'reaction.button': 'إرسال تعبير',
+  'reaction.cooldown': 'انتظر لحظة قبل إرسال تعبير آخر',
+  'reaction.title': 'تعبير سريع',
+  'reaction.happy': 'سعيد',
+  'reaction.laughing': 'يضحك',
+  'reaction.angry': 'غاضب',
+  'reaction.sad': 'حزين',
+  'reaction.cool': 'رائع',
+  'reaction.thumbsUp': 'إعجاب',
+  'reaction.thumbsDown': 'عدم إعجاب',
+  'reaction.surprised': 'متفاجئ',
+  'reaction.bored': 'ممل',
+  'reaction.fire': 'حماس',
+  'reaction.strong': 'قوي',
+  'reaction.clap': 'لعبة جيدة',
 };

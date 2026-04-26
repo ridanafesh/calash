@@ -39,6 +39,28 @@ export interface RoomError {
   meldIndex?: number;
 }
 
+/**
+ * Transient emoji reaction. Stored per-player; replaced when the same
+ * player sends a new one. Auto-cleared after REACTION_TTL_MS.
+ *
+ * `id` is the server-issued nonce — keeps React keys stable so the
+ * fade-in animation re-triggers when the same player fires the same
+ * emoji twice in a row.
+ */
+export interface ActiveReaction {
+  emoji: string;
+  id: string;
+  /** Wall-clock ms when the reaction arrived; used for fade-out timing. */
+  receivedAt: number;
+}
+
+/** Reactions live on screen this long, then auto-clear. */
+const REACTION_TTL_MS = 3500;
+
+/** Client-side cooldown — must match the server's so honest clients
+ *  never hit the rate limit (server is still authoritative). */
+const REACTION_COOLDOWN_MS = 2000;
+
 interface GameContextValue {
   connected: boolean;
   room: GameRoom | null;
@@ -65,6 +87,20 @@ interface GameContextValue {
   addBot: (difficulty?: BotDifficulty) => void;
   removeBot: (botUserId: string) => void;
   submitAction: (action: TurnAction) => void;
+  /**
+   * Send an emoji reaction. The server enforces a per-player cooldown;
+   * clients should also gate locally via `canReactNow()` to avoid
+   * obviously dropped sends.
+   */
+  sendReaction: (emoji: string) => void;
+  /** True when the local player is past their own cooldown. */
+  canReactNow: () => boolean;
+  /**
+   * Active reactions per playerId. Each entry is auto-removed
+   * REACTION_TTL_MS after it arrived. The map is keyed by playerId so
+   * a fresh reaction from the same player overwrites the previous one.
+   */
+  reactions: Record<string, ActiveReaction>;
   clearError: () => void;
   clearRoundResult: () => void;
 }
@@ -83,6 +119,15 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const [scores, setScores] = useState<GameScore[]>([]);
   const [roundResult, setRoundResult] = useState<RoundResult | null>(null);
   const [winner, setWinner] = useState<{ playerId: string; finalScore: number } | null>(null);
+  // Active emoji reactions, keyed by playerId. Each entry auto-clears
+  // REACTION_TTL_MS after it arrived. Stored in state (not a ref) so
+  // re-renders pick up new reactions immediately.
+  const [reactions, setReactions] = useState<Record<string, ActiveReaction>>({});
+  // Track expiration timers per player so a fresh reaction from the
+  // same player cancels the previous timer cleanly.
+  const reactionTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  // Local cooldown gate — purely UX; the server still enforces.
+  const lastReactionAt = useRef<number>(0);
 
   useEffect(() => {
     if (!token) {
@@ -126,11 +171,40 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     s.on('game:scores', setScores);
     s.on('game:round-result', setRoundResult);
     s.on('game:finished', setWinner);
+    // Emoji reactions arrive here. Replace any prior reaction from the
+    // same player and arm a fresh expiration timer so the bubble fades
+    // exactly REACTION_TTL_MS after it was received.
+    s.on('room:reaction', (event) => {
+      const { playerId, emoji, id } = event;
+      const existing = reactionTimers.current.get(playerId);
+      if (existing) clearTimeout(existing);
+      setReactions((prev) => ({
+        ...prev,
+        [playerId]: { emoji, id, receivedAt: Date.now() },
+      }));
+      const timer = setTimeout(() => {
+        setReactions((prev) => {
+          // Only delete if this exact reaction is still on screen — a
+          // newer reaction would have replaced the entry, and its own
+          // timer should be the one that clears it.
+          if (prev[playerId]?.id !== id) return prev;
+          const { [playerId]: _, ...rest } = prev;
+          return rest;
+        });
+        reactionTimers.current.delete(playerId);
+      }, REACTION_TTL_MS);
+      reactionTimers.current.set(playerId, timer);
+    });
 
     return () => {
       s.disconnect();
       socketRef.current = null;
       setConnected(false);
+      // Clear any pending reaction timers so they don't fire after the
+      // socket is gone (would race with the next mount).
+      for (const t of reactionTimers.current.values()) clearTimeout(t);
+      reactionTimers.current.clear();
+      setReactions({});
     };
   }, [token]);
 
@@ -155,6 +229,11 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     setScores([]);
     setRoundResult(null);
     setWinner(null);
+    // Clear any active reactions + their timers — leaving the room
+    // makes them stale by definition.
+    for (const t of reactionTimers.current.values()) clearTimeout(t);
+    reactionTimers.current.clear();
+    setReactions({});
   }, []);
 
   const toggleReady = useCallback(() => {
@@ -171,6 +250,21 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
   const submitAction = useCallback((action: TurnAction) => {
     socketRef.current?.emit('game:action', action);
+  }, []);
+
+  const sendReaction = useCallback((emoji: string) => {
+    const now = Date.now();
+    if (now - lastReactionAt.current < REACTION_COOLDOWN_MS) {
+      // Drop locally so the request never leaves the page. Server
+      // would reject it anyway; this just avoids the round-trip.
+      return;
+    }
+    lastReactionAt.current = now;
+    socketRef.current?.emit('room:reaction', emoji);
+  }, []);
+
+  const canReactNow = useCallback(() => {
+    return Date.now() - lastReactionAt.current >= REACTION_COOLDOWN_MS;
   }, []);
 
   return (
@@ -193,6 +287,9 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         addBot,
         removeBot,
         submitAction,
+        sendReaction,
+        canReactNow,
+        reactions,
         clearError: () => setRoomError(null),
         clearRoundResult: () => setRoundResult(null),
       }}

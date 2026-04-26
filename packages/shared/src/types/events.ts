@@ -49,6 +49,19 @@ export interface ClientToServerEvents {
    * and either applies it or responds with 'room:error'.
    */
   'game:action': (action: TurnAction) => void;
+
+  /**
+   * Send an emoji reaction to the room. The server enforces a per-player
+   * cooldown (configurable, currently ~2s) and re-broadcasts to all
+   * players in the room (including the sender) as 'room:reaction'.
+   * Reactions are ephemeral — the server does not persist them.
+   *
+   * `emoji` is a single user-visible character/sequence such as '😂'.
+   * The server validates it against an allowlist and silently drops
+   * anything else, so a misbehaving client can't push arbitrary text
+   * through this channel.
+   */
+  'room:reaction': (emoji: string) => void;
 }
 
 /** Events the server broadcasts to clients. */
@@ -89,6 +102,21 @@ export interface ServerToClientEvents {
   'game:round-result': (result: RoundResult) => void;
   'game:scores': (scores: GameScore[]) => void;
   'game:finished': (winner: { playerId: string; finalScore: number }) => void;
+
+  /**
+   * Ephemeral emoji reaction broadcast. Sent to every socket in the
+   * room (including the original sender, so their own UI can confirm
+   * the reaction landed). Carries the emoji + the sending player so
+   * the client can render a temporary bubble next to that player's
+   * seat. `id` is a server-generated nonce so React keys stay stable
+   * if the same player fires the same emoji twice in a row — without
+   * it, the bubble wouldn't re-trigger its fade animation.
+   */
+  'room:reaction': (event: {
+    playerId: string;
+    emoji: string;
+    id: string;
+  }) => void;
 }
 
 /** Events used between server instances (reserved for future horizontal scaling). */

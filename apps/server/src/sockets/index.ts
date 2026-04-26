@@ -23,6 +23,7 @@ import {
   restorePlayerToRoom,
 } from './handlers/room.js';
 import { handleGameAction } from './handlers/game.js';
+import { handleReaction } from './handlers/reaction.js';
 
 export function createSocketServer(httpServer: HttpServer): Server<
   ClientToServerEvents,
@@ -141,6 +142,18 @@ export function createSocketServer(httpServer: HttpServer): Server<
         console.error('[socket] game:action error:', err);
         socket.emit('room:error', { code: 'INTERNAL_ERROR', message: 'Internal server error.' });
       });
+    });
+
+    // ── Emoji reactions ──────────────────────────────────────────────────────
+    // Synchronous handler — reactions are pure in-memory broadcast with
+    // no persistence, no game-state mutation. Server enforces the
+    // emoji allowlist and a per-player cooldown.
+    socket.on('room:reaction', (emoji) => {
+      try {
+        handleReaction(socket, io, emoji);
+      } catch (err) {
+        console.error('[socket] room:reaction error:', err);
+      }
     });
 
     // ── Disconnect ────────────────────────────────────────────────────────────

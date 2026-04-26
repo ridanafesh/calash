@@ -13,6 +13,7 @@ import { DiscardInspector } from './DiscardInspector';
 import { HandToolbar } from './HandToolbar';
 import { ScoresPanel } from './ScoresPanel';
 import { JokerAssignmentPicker } from './JokerAssignmentPicker';
+import { EmojiReactionButton } from './EmojiReactionButton';
 import { applySortMode, type HandSortMode } from './hand-sort';
 import { detectMeldFitness, findExtendableMelds, sortForMeldPreview } from './meld-detect';
 
@@ -32,7 +33,7 @@ function sumCards(cards: readonly Card[]): number {
 
 export function GameBoard() {
   const { user } = useAuth();
-  const { room, gameState, hand, myDrawnCard, roundResult, winner, scores, submitAction, leaveRoom, clearRoundResult, roomError, clearError } =
+  const { room, gameState, hand, myDrawnCard, roundResult, winner, scores, submitAction, leaveRoom, clearRoundResult, roomError, clearError, reactions } =
     useGame();
   const t = useT();
 
@@ -464,6 +465,7 @@ export function GameBoard() {
             {t('game.opponentTurn', { name: nameOf(gameState.currentTurnPlayerId) })}
           </span>
         )}
+        <EmojiReactionButton />
         <LanguageSwitcher />
         <button
           className="btn btn-ghost btn-sm"
@@ -486,8 +488,14 @@ export function GameBoard() {
             <div
               key={opId}
               className="opponent-zone"
-              style={{ borderColor: isOpTurn ? 'var(--warning)' : undefined }}
+              style={{
+                borderColor: isOpTurn ? 'var(--warning)' : undefined,
+                // position: relative so the absolute reaction bubble can
+                // anchor to this zone's top-end corner.
+                position: 'relative',
+              }}
             >
+              <ReactionBubble reaction={reactions[opId]} />
               <div className="row" style={{ gap: 6 }}>
                 <div
                   className="avatar"
@@ -581,7 +589,8 @@ export function GameBoard() {
       </div>
 
       {/* ── My melds ── */}
-      <div className="my-section">
+      <div className="my-section" style={{ position: 'relative' }}>
+        <ReactionBubble reaction={reactions[myId]} />
         <div style={{ fontSize: '0.75rem', color: 'rgba(255,255,255,0.45)' }}>
           {t('game.myMelds')}
           {myState?.hasGoneDown && (
@@ -1250,6 +1259,49 @@ export function GameBoard() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Floating bubble that pops above a player's seat when they send an
+ * emoji reaction. Mounts inside a position:relative container (the
+ * opponent zone or my-section) and absolutely positions itself in the
+ * top-end corner so it never displaces layout.
+ *
+ * Renders nothing if there's no active reaction. The bubble is keyed
+ * by `reaction.id`, so a fresh reaction from the same player remounts
+ * the element and re-triggers the entrance animation.
+ */
+function ReactionBubble({
+  reaction,
+}: {
+  reaction: import('@/lib/game-context').ActiveReaction | undefined;
+}) {
+  if (!reaction) return null;
+  return (
+    <div
+      key={reaction.id}
+      aria-live="polite"
+      style={{
+        position: 'absolute',
+        top: -10,
+        // Use insetInlineEnd so RTL automatically anchors to the visual
+        // end (left in RTL, right in LTR) without extra logic.
+        insetInlineEnd: -6,
+        zIndex: 30,
+        pointerEvents: 'none',
+        fontSize: '1.6rem',
+        background: 'rgba(0, 0, 0, 0.78)',
+        border: '1px solid rgba(255, 255, 255, 0.2)',
+        borderRadius: 999,
+        padding: '4px 9px',
+        lineHeight: 1,
+        boxShadow: '0 6px 14px -4px rgba(0,0,0,0.6)',
+        animation: 'reaction-bubble-in 220ms ease-out, reaction-bubble-out 380ms ease-in 3120ms forwards',
+      }}
+    >
+      {reaction.emoji}
     </div>
   );
 }
