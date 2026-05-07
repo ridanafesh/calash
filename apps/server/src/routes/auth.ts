@@ -210,7 +210,7 @@ router.post('/auth/google', async (req, res, next) => {
 
 // ─── Guest sign-in ────────────────────────────────────────────────────────────
 
-router.post('/auth/guest', async (req, res, next) => {
+router.post('/auth/guest', async (_req, res, next) => {
   try {
     const username = await uniqueUsername(`guest_${Math.random().toString(36).slice(2, 8)}`);
     const created = await db.users.createGuest(username);

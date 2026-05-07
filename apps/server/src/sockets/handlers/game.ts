@@ -14,7 +14,7 @@ import { pool } from '../../db/index.js';
 import { createDatabaseService } from '../../db/repositories/index.js';
 import { roomStore, type RoomState } from '../../store/index.js';
 import { decideBotAction } from '../../services/bot.service.js';
-import { startGame, toGameRoom, broadcastRoomUpdate } from './room.js';
+import { startGame, toGameRoom } from './room.js';
 
 type CalashSocket = Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
 type CalashServer = Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;

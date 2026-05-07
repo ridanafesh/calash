@@ -1,0 +1,24 @@
+{
+  // Production-only TypeScript config. Inherits everything from
+  // tsconfig.json (which Jest + IDE tooling use) and ADDS test-file
+  // exclusions so `tsc -p tsconfig.build.json` doesn't try to compile
+  // the Jest specs.
+  //
+  // Why a separate file?
+  //   - tsconfig.json must keep the tests in `include` so editors and
+  //     `tsc --noEmit` validate them as you write them.
+  //   - The Render build runs `npm run build` which calls
+  //     `tsc -p tsconfig.build.json` and emits to dist/ — we don't
+  //     want test files in the deployed image.
+  //
+  // Keep this file in sync with tsconfig.json's compilerOptions; only
+  // the `exclude` list should diverge.
+  "extends": "./tsconfig.json",
+  "exclude": [
+    "node_modules",
+    "dist",
+    "src/**/*.test.ts",
+    "src/**/*.spec.ts",
+    "src/__tests__/**"
+  ]
+}
