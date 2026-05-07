@@ -51,7 +51,10 @@ if command -v docker &>/dev/null; then
   sleep 3
 
   info "Running database migrations..."
-  npm run db:migrate -w apps/server
+  # db:migrate:dev runs the migrator straight from .ts via tsx, so a
+  # fresh checkout doesn't need `npm run build` first. Production uses
+  # the compiled-JS variant (db:migrate) chained from start:prod.
+  npm run db:migrate:dev -w apps/server
   success "Migrations applied"
 
   info "Seeding database with development data..."
@@ -59,7 +62,7 @@ if command -v docker &>/dev/null; then
   success "Database seeded"
 else
   warn "Docker not found — start PostgreSQL manually, then run:"
-  warn "  npm run db:migrate -w apps/server"
+  warn "  npm run db:migrate:dev -w apps/server"
   warn "  npm run db:seed -w apps/server"
 fi
 

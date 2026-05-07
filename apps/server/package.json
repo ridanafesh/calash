@@ -6,10 +6,15 @@
   "main": "./dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && node scripts/copy-migrations.mjs",
     "start": "node dist/index.js",
-    "db:migrate": "npx tsx src/db/migrate.ts",
-    "db:seed": "npx tsx src/db/seed.ts",
+    "// db:migrate": "Production migrate runner. Reads compiled JS + the SQL files copied into dist/db/migrations by the build step. Used by start:prod and runnable directly on hosts that exec node only.",
+    "db:migrate": "node dist/db/migrate.js",
+    "// db:migrate:dev": "Local-only convenience that runs the migrator straight from .ts via tsx, so you don't have to build first.",
+    "db:migrate:dev": "tsx src/db/migrate.ts",
+    "db:seed": "tsx src/db/seed.ts",
+    "// start:prod": "Production startup: apply pending migrations first (idempotent — already-applied ones are skipped via schema_migrations) then start the server. This is what Render's Start Command should invoke.",
+    "start:prod": "npm run db:migrate && node dist/index.js",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage"

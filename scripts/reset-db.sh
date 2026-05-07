@@ -27,7 +27,10 @@ echo "Creating database..."
 psql "${DB_BASE}/postgres" -c "CREATE DATABASE ${DB_NAME};"
 
 echo "Running migrations..."
-npm run db:migrate -w apps/server
+# Use the dev variant (tsx → src/db/migrate.ts) so this script doesn't
+# require a prior `npm run build`. Production uses db:migrate (compiled JS)
+# via start:prod.
+npm run db:migrate:dev -w apps/server
 
 echo "Seeding database..."
 npm run db:seed -w apps/server
