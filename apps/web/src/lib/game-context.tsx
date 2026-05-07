@@ -24,6 +24,7 @@ import type {
   ServerToClientEvents,
 } from '@calash/shared';
 import { useAuth } from './auth-context';
+import { socketUrl } from './server-urls';
 
 type CalashSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
@@ -140,7 +141,11 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    const wsUrl = process.env['NEXT_PUBLIC_WS_URL'] ?? 'http://localhost:4000';
+    // Resolves NEXT_PUBLIC_SOCKET_URL → NEXT_PUBLIC_WS_URL → NEXT_PUBLIC_API_URL → localhost.
+    // This is the actual hot path: the dev → prod bug we hit was that
+    // Render set NEXT_PUBLIC_SOCKET_URL but the code only checked WS_URL,
+    // so the localhost fallback fired in production.
+    const wsUrl = socketUrl();
     const s = io(wsUrl, { auth: { token }, reconnectionAttempts: 10 }) as CalashSocket;
     socketRef.current = s;
 

@@ -10,7 +10,12 @@ import type {
   UserProfile,
 } from '@calash/shared';
 
-const BASE_URL = process.env['NEXT_PUBLIC_API_URL'] ?? 'http://localhost:4000';
+import { apiUrl } from './server-urls';
+
+// Resolved once per module load. NEXT_PUBLIC_* values are baked at
+// build time, so this can't change at runtime — no need to recompute
+// per request.
+const BASE_URL = apiUrl();
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {

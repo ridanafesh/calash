@@ -5,7 +5,9 @@ import type {
   ServerToClientEvents,
 } from '@calash/shared';
 
-const WS_URL = process.env['NEXT_PUBLIC_WS_URL'] ?? 'http://localhost:4000';
+import { socketUrl } from './server-urls';
+
+const WS_URL = socketUrl();
 
 let socket: Socket<ServerToClientEvents, ClientToServerEvents> | null = null;
 
