@@ -31,12 +31,17 @@ function RoomPageInner() {
     if (roomError) setJoining(false);
   }, [roomError]);
 
-  // Finished rooms → back to lobby after a moment
+  // Finished rooms → back to lobby after a moment.
+  // Explicit `return undefined` on the non-finished branch satisfies TS's
+  // "Not all code paths return a value" check (`next build` enforces this
+  // even though Jest/dev mode doesn't); the cleanup return on the
+  // finished branch keeps its existing semantics.
   useEffect(() => {
     if (room?.status === 'finished') {
       const t = setTimeout(() => router.push('/lobby'), 8000);
       return () => clearTimeout(t);
     }
+    return undefined;
   }, [room?.status, router]);
 
   // ── Loading: waiting for socket to connect ──

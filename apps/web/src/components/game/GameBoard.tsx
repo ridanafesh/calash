@@ -168,8 +168,10 @@ export function GameBoard() {
 
   // All melds currently on the table (mine + opponents'), with owner ids so
   // we can compare against the engine's add-to-meld lookup.
-  const allTableMelds = useMemo(() => {
-    if (!gameState) return [] as Array<{ id: string; type: typeof gameState.playerStates[string]['melds'][number]['type']; cards: typeof gameState.playerStates[string]['melds'][number]['cards']; ownerId: string }>;
+  const allTableMelds = useMemo<
+    Array<{ id: string; type: 'sequence' | 'set'; cards: readonly Card[]; ownerId: string }>
+  >(() => {
+    if (!gameState) return [];
     const out: Array<{ id: string; type: 'sequence' | 'set'; cards: readonly Card[]; ownerId: string }> = [];
     for (const [ownerId, ps] of Object.entries(gameState.playerStates)) {
       for (const m of ps.melds) {

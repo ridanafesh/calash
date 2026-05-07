@@ -842,6 +842,7 @@ export function toRoundStateView(state: RoundState): RoundStateView {
     hiddenDeckCount: state.hiddenDeck.length,
     discardPile: state.discardPile,
     highestTableTotal: state.highestTableTotal,
+    didTakeFromDiscardThisTurn: state.didTakeFromDiscardThisTurn,
     endReason: state.endReason,
     finisherPlayerId: state.finisherPlayerId,
     // PRIVACY: only the OWNER of the pending draw decision should see the

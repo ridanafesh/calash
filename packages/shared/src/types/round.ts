@@ -112,6 +112,14 @@ export interface RoundStateView {
 
   discardPile: Card[];
   highestTableTotal: number;
+  /**
+   * True iff the current turn player has already taken from the discard
+   * pile this turn — the rule that blocks go-down / add-to-meld /
+   * replace-joker for the rest of THIS turn (moot in practice because
+   * take-from-discard is self-terminating, but the UI uses this flag
+   * to gate quick-actions while the action is in flight).
+   */
+  didTakeFromDiscardThisTurn: boolean;
   endReason?: RoundEndReason;
   finisherPlayerId?: string;
   /**

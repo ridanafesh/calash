@@ -1,0 +1,26 @@
+{
+  "// description": "Web-workspace ESLint config. Extends Next.js's recommended config (which already wires the @typescript-eslint parser, react/next plugins, and the import plugin) and points the import resolver at this workspace's tsconfig so the '@/*' alias resolves correctly during `next lint` and `next build`.",
+  "// why-not-just-root-config": "The repo root .eslintrc.js uses the typescript resolver but doesn't know which tsconfig to load — at the web workspace it should pick apps/web/tsconfig.json so the @/* paths in src/ resolve. The 'project' field below pins it explicitly.",
+  "root": true,
+  "extends": [
+    "next/core-web-vitals",
+    "plugin:@typescript-eslint/recommended"
+  ],
+  "parser": "@typescript-eslint/parser",
+  "settings": {
+    "import/resolver": {
+      "typescript": {
+        "alwaysTryTypes": true,
+        "project": "./tsconfig.json"
+      },
+      "node": {
+        "extensions": [".ts", ".tsx", ".js", ".jsx"]
+      }
+    }
+  },
+  "rules": {
+    "@typescript-eslint/no-unused-vars": ["warn", { "argsIgnorePattern": "^_" }],
+    "@typescript-eslint/no-explicit-any": "warn"
+  },
+  "ignorePatterns": ["node_modules/", ".next/", "out/", "next-env.d.ts"]
+}
