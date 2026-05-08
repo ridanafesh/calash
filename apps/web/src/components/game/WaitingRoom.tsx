@@ -47,9 +47,9 @@ export function WaitingRoom() {
         <span style={{ fontWeight: 700, fontSize: '1.05rem' }}>{t('waiting.title')}</span>
         <div className="row" style={{ gap: 8 }}>
           <LanguageSwitcher />
-          <button className="btn btn-ghost btn-sm" onClick={leaveRoom}>
+          <Link href="/lobby" className="btn btn-ghost btn-sm" onClick={leaveRoom}>
             {t('waiting.leave')}
-          </button>
+          </Link>
         </div>
       </header>
 

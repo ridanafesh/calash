@@ -13,7 +13,7 @@ import { GAME_CONFIG } from '@calash/shared';
 
 import { pool } from '../../db/index.js';
 import { createDatabaseService } from '../../db/repositories/index.js';
-import { roomStore, generateInviteCode, type RoomState } from '../../store/index.js';
+import { roomStore, generateInviteCode, type PlayerSlot, type RoomState } from '../../store/index.js';
 import { createBotUser } from '../../services/bot.service.js';
 
 type CalashSocket = Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
@@ -78,6 +78,60 @@ function logRoom(
     parts.push(`${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`);
   }
   console.log(parts.join(' '));
+}
+
+/**
+ * Flip a seat into bot-driven mode without removing it from the round.
+ *
+ * Why this shape works: RoundState keys EVERYTHING by user id (playerOrder,
+ * playerStates, currentTurnPlayerId, melds, ownerships). If we tried to
+ * substitute a different user id when a human leaves mid-game we'd have to
+ * rewrite all of those plus several DB rows that FK back to users(id).
+ * Instead we keep the seat's user id intact (the original human's) and
+ * just toggle isBot. The bot driver in handlers/game.ts keys off slot.isBot
+ * — the moment we set it, the same scheduleBotIfNeeded loop will start
+ * playing this seat's turns when they come up. Hand / melds / score /
+ * turn-state stay tied to the user id and survive untouched.
+ *
+ * On rejoin we flip isBot back to false, reattach the socket, and the
+ * human takes over from whatever state the bot reached. No round-state
+ * mutation needed; the reconnect flow already pushes the current
+ * game:state + game:hand to the rejoining player.
+ *
+ * Returns true if the seat was actually flipped (was a human), false if
+ * it was already a bot (idempotent — safe to call from disconnect handlers).
+ */
+export function substituteSeatWithBot(slot: PlayerSlot, opts: { difficulty?: BotDifficulty } = {}): boolean {
+  if (slot.isBot) return false;
+  slot.isBot = true;
+  slot.botDifficulty = opts.difficulty ?? 'easy';
+  // Drop the human's socket binding — bots never have a socket. The
+  // sendDrawnCardPrivately + game:hand emits already gate on
+  // !slot.isBot && slot.socketId, so any stale socket reference would
+  // be a no-op anyway, but cleaning it up keeps the model consistent.
+  slot.socketId = null;
+  // Mark ready so any waiting-room state stays consistent (bots are
+  // always ready). The room is in-progress when we hit this path, so
+  // this is mostly defensive in case a player leaves the millisecond
+  // before startGame completes.
+  slot.isReady = true;
+  return true;
+}
+
+/**
+ * Reverse of substituteSeatWithBot — the original human is back. We
+ * re-flag the seat as human and reattach the live socket. Bot turns
+ * already played in the interim are kept as-is in the round state;
+ * the rejoining client's first game:state push will reflect them.
+ */
+export function reclaimSeatFromBot(slot: PlayerSlot, socketId: string, displayName: string): void {
+  slot.isBot = false;
+  slot.botDifficulty = undefined;
+  slot.socketId = socketId;
+  // Don't touch isReady — the round is in-progress, ready state is
+  // moot. If the room ever returns to lobby (next round) the normal
+  // ready toggle handles it.
+  void displayName; // displayName is set on initial join; preserved through substitute/reclaim.
 }
 
 /**
@@ -365,13 +419,35 @@ async function joinRoom(
 ): Promise<void> {
   const { playerId, displayName } = socket.data;
 
-  // If player is already in this room (reconnect), just restore.
+  // If player is already in this room (reconnect / reclaim), just restore.
+  // Two sub-cases:
+  //   - existing.isBot === false: ordinary reconnect (refresh / dropped
+  //     socket / second tab). Update the socket, push state, done.
+  //   - existing.isBot === true: the seat was substituted because this
+  //     player previously left mid-game. Flip it back to a human seat
+  //     and cancel any pending bot timer so the bot driver doesn't
+  //     fight the rejoining human for the next action.
   const existing = room.players.find((p) => p.userId === playerId);
   if (existing) {
-    roomStore.updateSocket(room.roomId, playerId, socket.id);
+    const wasBotSubstitute = existing.isBot;
+    if (wasBotSubstitute) {
+      reclaimSeatFromBot(existing, socket.id, displayName ?? existing.displayName);
+      // Cancel any pending bot turn for this room — the human is back
+      // and may want to act before the bot's setTimeout fires.
+      // (cancelBotTimer also resets the per-room failure counter.)
+      const { cancelBotTimer } = await import('./game.js');
+      cancelBotTimer(room.roomId);
+    } else {
+      roomStore.updateSocket(room.roomId, playerId, socket.id);
+    }
     socket.data.roomId = room.roomId;
     await socket.join(room.roomId);
     socket.emit('room:updated', toGameRoom(room));
+    if (wasBotSubstitute) {
+      // Tell every other player in the room the seat is back under
+      // human control so their UI flips the bot badge off.
+      broadcastRoomUpdate(io, room);
+    }
 
     if (room.round) {
       const { toRoundStateView } = await import('@calash/game-core');
@@ -379,13 +455,15 @@ async function joinRoom(
       const ps = room.round.state.playerStates[playerId];
       if (ps) socket.emit('game:hand', ps.hand);
     }
-    logRoom('reconnect', {
-      action: 'reconnect',
+    logRoom(wasBotSubstitute ? 'reclaim' : 'reconnect', {
+      action: wasBotSubstitute ? 'rejoin' : 'reconnect',
       roomId: room.roomId,
       roomCode: room.inviteCode,
       userId: playerId,
+      seatIndex: existing.seatIndex,
       status: room.status,
       activePlayerCount: room.players.length,
+      reclaimedFromBot: wasBotSubstitute,
     });
     return;
   }
@@ -534,11 +612,47 @@ export async function handleRoomLeave(
   const room = roomStore.get(roomId);
   if (!room) return;
 
+  // ── Mid-game leave: substitute the seat with a bot ──────────────────────
+  // The seat keeps its user id (the original human's) and stays in the
+  // round. Hand, melds, score, turn-state all survive intact — the bot
+  // driver picks up the same seat next time it's that user id's turn.
+  // The user's `game_room_players` row stays open with left_at = NULL so
+  // they can rejoin and reclaim. socket.data.roomId is cleared and the
+  // socket leaves the channel; the human's UI navigates back to the lobby.
   if (room.status === 'in-progress') {
-    emitError(socket, 'CANNOT_LEAVE', 'You cannot leave during an active game.');
-    return;
+    const slot = room.players.find((p) => p.userId === playerId);
+    if (slot && !slot.isBot) {
+      const flipped = substituteSeatWithBot(slot);
+      socket.data.roomId = undefined;
+      await socket.leave(roomId);
+      broadcastRoomUpdate(io, room);
+
+      // If it's currently this seat's turn, kick the bot driver so the
+      // game continues without waiting for the human's next action.
+      if (room.round && room.round.state.currentTurnPlayerId === playerId) {
+        const { scheduleBotIfNeeded } = await import('./game.js');
+        scheduleBotIfNeeded(roomId, io);
+      }
+
+      logRoom('leave-substitute', {
+        action: 'leave',
+        roomId,
+        roomCode: room.inviteCode,
+        userId: playerId,
+        seatIndex: slot.seatIndex,
+        status: room.status,
+        activePlayerCount: room.players.length,
+        flipped,
+        substitutedTurn: room.round?.state.currentTurnPlayerId === playerId,
+      });
+      return;
+    }
+    // Slot not found OR already a bot somehow — fall through to the
+    // standard leave path. (Bots leaving mid-game shouldn't happen since
+    // bots only "leave" via removeBot in the lobby.)
   }
 
+  // ── Lobby / finished-state leave: full removal ──────────────────────────
   await db.rooms.removePlayer(roomId, playerId);
 
   room.players = room.players.filter((p) => p.userId !== playerId);
@@ -643,9 +757,24 @@ export function handleDisconnect(
   if (room.status === 'lobby') {
     broadcastRoomUpdate(io, room);
   }
-  // In-game: keep state; client can reconnect and resume.
-
-  console.log(`[room] ${playerId} disconnected from room ${roomId}`);
+  // In-game: keep the seat state intact. The socket has dropped (could
+  // be a blip, page refresh, second tab, or full-on disconnect) — the
+  // bot driver only acts on slots where isBot === true, so an
+  // unsubstituted seat just waits for reconnect. Deliberate "Leave"
+  // through the UI takes the substitution path in handleRoomLeave; raw
+  // socket drops do NOT auto-substitute, on the grounds that a brief
+  // blip shouldn't surrender the player's hand to a bot. If a future
+  // requirement wants timeout-based substitution after N seconds of
+  // silence, do it here with a setTimeout that calls
+  // substituteSeatWithBot when the timer fires AND the slot is still
+  // socketId === null AND still isBot === false.
+  logRoom('disconnect', {
+    action: 'leave',
+    roomId,
+    roomCode: room.inviteCode,
+    userId: playerId,
+    status: room.status,
+  });
 }
 
 // ─── Game start ──────────────────────────────────────────────────────────────

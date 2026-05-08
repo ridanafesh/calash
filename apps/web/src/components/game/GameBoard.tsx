@@ -475,9 +475,18 @@ export function GameBoard() {
         >
           {t('game.scores')}
         </button>
-        <button className="btn btn-ghost btn-sm" onClick={leaveRoom}>
+        <Link
+          href="/lobby"
+          className="btn btn-ghost btn-sm"
+          // Trigger leaveRoom() before the navigation so the server gets
+          // the room:leave event and substitutes a bot if the game is
+          // active. The navigation itself is the smooth UX bit — without
+          // explicit /lobby push, the rooms/[id] page would re-fire its
+          // join effect (since connected && !room) and put us right back.
+          onClick={leaveRoom}
+        >
           {t('game.leave')}
-        </button>
+        </Link>
       </div>
 
       {/* ── Opponents ── */}
