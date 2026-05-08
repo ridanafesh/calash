@@ -324,4 +324,14 @@ export const ar: Record<string, string> = {
   'reaction.fire': 'حماس',
   'reaction.strong': 'قوي',
   'reaction.clap': 'لعبة جيدة',
+
+  // ─── Guest name popup ────────────────────────────────────────────────────
+  'guest.popup.title': 'اختر اسمًا للعرض',
+  'guest.popup.hint': 'لقد أعطيناك اسمًا. احتفظ به أو غيّره — هذا ما سيراه اللاعبون الآخرون.',
+  'guest.popup.placeholder': 'اسم العرض',
+  'guest.popup.save': 'حفظ',
+  'guest.popup.saving': 'جارٍ الحفظ…',
+  'guest.popup.error.empty': 'يرجى إدخال اسم.',
+  'guest.popup.error.tooLong': 'يجب ألا يزيد الاسم عن {{n}} حرفًا.',
+  'guest.popup.error.saveFailed': 'تعذّر الحفظ. يرجى المحاولة مرة أخرى.',
 };

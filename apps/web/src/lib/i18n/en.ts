@@ -327,4 +327,14 @@ export const en: Record<string, string> = {
   'reaction.fire': 'Hype',
   'reaction.strong': 'Strong',
   'reaction.clap': 'Well played',
+
+  // ─── Guest name popup ────────────────────────────────────────────────────
+  'guest.popup.title': 'Pick a display name',
+  'guest.popup.hint': "We've given you a name. Keep it or change it — this is what other players will see.",
+  'guest.popup.placeholder': 'Display name',
+  'guest.popup.save': 'Save',
+  'guest.popup.saving': 'Saving…',
+  'guest.popup.error.empty': 'Please enter a name.',
+  'guest.popup.error.tooLong': 'Name must be {{n}} characters or fewer.',
+  'guest.popup.error.saveFailed': "Couldn't save. Please try again.",
 };

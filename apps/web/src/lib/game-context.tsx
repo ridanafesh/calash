@@ -130,6 +130,13 @@ interface GameContextValue {
   /** True when the local player is past their own cooldown. */
   canReactNow: () => boolean;
   /**
+   * Force the socket to reconnect. Used after a profile change
+   * (e.g. guest renaming themselves) so the server re-reads
+   * display_name on handshake and seat/slot displayName values
+   * reflect the new name from the very next room interaction.
+   */
+  reconnectSocket: () => void;
+  /**
    * Active reactions per playerId. Each entry is auto-removed
    * REACTION_TTL_MS after it arrived. The map is keyed by playerId so
    * a fresh reaction from the same player overwrites the previous one.
@@ -358,6 +365,16 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     return Date.now() - lastReactionAt.current >= REACTION_COOLDOWN_MS;
   }, []);
 
+  const reconnectSocket = useCallback(() => {
+    const s = socketRef.current;
+    if (!s) return;
+    // disconnect() + connect() reuses the same Socket instance and the
+    // existing auth token, but the server-side handshake re-runs and
+    // re-reads display_name from the DB into socket.data.displayName.
+    s.disconnect();
+    s.connect();
+  }, []);
+
   return (
     <GameContext.Provider
       value={{
@@ -383,6 +400,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         submitAction,
         sendReaction,
         canReactNow,
+        reconnectSocket,
         reactions,
         clearError: () => setRoomError(null),
         clearRoundResult: () => setRoundResult(null),

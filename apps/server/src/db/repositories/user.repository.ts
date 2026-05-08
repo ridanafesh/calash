@@ -188,9 +188,12 @@ export class UserRepository {
         [user.id],
       );
 
+      // Friendly default like "Guest 4821" — gives the guest-name popup
+      // something sensible to prefill with instead of null.
+      const defaultDisplay = `Guest ${Math.floor(1000 + Math.random() * 9000)}`;
       const { rows: profileRows } = await client.query<PlayerProfileRow>(
-        `INSERT INTO player_profiles (user_id, username) VALUES ($1, $2) RETURNING *`,
-        [user.id, username],
+        `INSERT INTO player_profiles (user_id, username, display_name) VALUES ($1, $2, $3) RETURNING *`,
+        [user.id, username, defaultDisplay],
       );
 
       await client.query('INSERT INTO leaderboard_entries (user_id) VALUES ($1)', [user.id]);
