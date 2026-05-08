@@ -19,6 +19,7 @@ function LobbyInner() {
   const t = useT();
 
   const [rooms, setRooms] = useState<GameRoom[]>([]);
+  const [rejoinableRooms, setRejoinableRooms] = useState<GameRoom[]>([]);
   const [loadingRooms, setLoadingRooms] = useState(true);
   const [fetchError, setFetchError] = useState('');
   const [startingVsBot, setStartingVsBot] = useState(false);
@@ -77,8 +78,12 @@ function LobbyInner() {
     let cancelled = false;
     async function load() {
       try {
-        const list = await apiClient.getRooms();
-        if (!cancelled) { setRooms(list); setFetchError(''); }
+        const data = await apiClient.getRoomsWithRejoinable();
+        if (!cancelled) {
+          setRooms(data.open);
+          setRejoinableRooms(data.rejoinable);
+          setFetchError('');
+        }
       } catch {
         if (!cancelled) setFetchError('Could not load rooms.');
       } finally {
@@ -128,6 +133,39 @@ function LobbyInner() {
             {startingVsBot ? <><span className="spinner" />{t('common.loading')}</> : `🤖 ${t('lobby.playVsBots')}`}
           </button>
         </div>
+
+        {rejoinableRooms.length > 0 && (
+          <div style={{ marginBottom: '1.5rem' }}>
+            <div className="row" style={{ justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+              <h2 style={{ fontWeight: 700, fontSize: '1rem' }}>{t('lobby.rejoinable.title')}</h2>
+            </div>
+            <div className="col" style={{ gap: '0.6rem' }}>
+              {rejoinableRooms.map((r) => (
+                <div key={r.id} className="surface row" style={{ justifyContent: 'space-between', gap: 12 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div className="row" style={{ gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
+                      <span className="room-code" style={{ fontSize: '0.9rem', letterSpacing: '0.15em', padding: '2px 8px' }}>
+                        {r.code}
+                      </span>
+                      <span className="badge badge-accent">⏳ {t('lobby.rejoinable.badge')}</span>
+                    </div>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                      {t('lobby.rejoinable.hint')}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => router.push(`/rooms/${r.id}`)}
+                    className="btn btn-primary btn-sm"
+                    style={{ flexShrink: 0 }}
+                  >
+                    {t('lobby.rejoinable.action')} →
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="row" style={{ justifyContent: 'space-between', marginBottom: '0.75rem' }}>
           <h2 style={{ fontWeight: 700, fontSize: '1rem' }}>{t('lobby.title')}</h2>

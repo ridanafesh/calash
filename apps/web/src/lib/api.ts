@@ -91,6 +91,18 @@ export const apiClient = {
   getRooms: () =>
     request<GameRoom[]>('/api/rooms', { headers: authHeaders() }),
 
+  /**
+   * Returns the public open-rooms list AND the caller's rejoinable
+   * rooms (in-progress rooms where they previously left and the seat
+   * is bot-substituted, waiting for them). The lobby renders these
+   * as two distinct sections.
+   */
+  getRoomsWithRejoinable: () =>
+    request<{ open: GameRoom[]; rejoinable: GameRoom[] }>(
+      '/api/rooms?include=rejoinable',
+      { headers: authHeaders() },
+    ),
+
   getRoom: (id: string) =>
     request<GameRoom>(`/api/rooms/${id}`, { headers: authHeaders() }),
 

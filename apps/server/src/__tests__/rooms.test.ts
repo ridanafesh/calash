@@ -10,6 +10,10 @@ const mockRoomsRepo = {
   findActiveRoomForUser: jest.fn(),
   create: jest.fn(),
   findOpenRooms: jest.fn(),
+  // GET /api/rooms now also fetches the caller's rejoinable rooms
+  // (in-progress rooms with their seat bot-substituted) so the lobby
+  // can render a separate "your rooms" list.
+  findRejoinableRoomsForUser: jest.fn(),
   findWithPlayers: jest.fn(),
 };
 
@@ -93,13 +97,43 @@ describe('GET /api/rooms', () => {
   it('returns 200 with list of rooms', async () => {
     const token = makeToken('user-1');
     mockRoomsRepo.findOpenRooms.mockResolvedValue([]);
+    mockRoomsRepo.findRejoinableRoomsForUser.mockResolvedValue([]);
 
     const res = await request(app)
       .get('/api/rooms')
       .set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
+    // Default response shape (no ?include=rejoinable) is still a flat array
+    // of open rooms — preserved for any older client.
     expect(Array.isArray(res.body.data)).toBe(true);
+  });
+
+  it('with ?include=rejoinable, returns wrapped object with both lists', async () => {
+    const token = makeToken('user-1');
+    mockRoomsRepo.findOpenRooms.mockResolvedValue([]);
+    mockRoomsRepo.findRejoinableRoomsForUser.mockResolvedValue([
+      {
+        id: 'room-rejoin',
+        host_user_id: 'someone-else',
+        invite_code: 'ABCD12',
+        is_private: false,
+        status: 'in_progress',
+        max_players: 4,
+        created_at: new Date(),
+      },
+    ]);
+
+    const res = await request(app)
+      .get('/api/rooms?include=rejoinable')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(Array.isArray(res.body.data.open)).toBe(true);
+    expect(Array.isArray(res.body.data.rejoinable)).toBe(true);
+    expect(res.body.data.rejoinable).toHaveLength(1);
+    expect(res.body.data.rejoinable[0].id).toBe('room-rejoin');
+    expect(res.body.data.rejoinable[0].status).toBe('in-progress');
   });
 });
 

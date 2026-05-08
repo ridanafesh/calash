@@ -82,23 +82,45 @@ router.post('/rooms', requireAuth, async (req, res) => {
 // ─── GET /api/rooms ───────────────────────────────────────────────────────────
 // List open rooms (lobby status, not yet full).
 
-router.get('/rooms', requireAuth, async (_req, res) => {
-  const openRooms = await db.rooms.findOpenRooms();
+router.get('/rooms', requireAuth, async (req, res) => {
+  const userId = req.auth!.userId;
 
-  const rooms = openRooms.map((r) => {
+  const [openRooms, rejoinable] = await Promise.all([
+    db.rooms.findOpenRooms(),
+    db.rooms.findRejoinableRoomsForUser(userId),
+  ]);
+
+  // De-dup: a rejoinable room is mid-game (status=in_progress) so it
+  // won't appear in findOpenRooms anyway, but guard with a Set in case
+  // that ever changes.
+  const rejoinableIds = new Set(rejoinable.map((r) => r.id));
+
+  function dbRowToGameRoom(r: typeof openRooms[number], status: GameRoom['status']): GameRoom {
     const memRoom = roomStore.get(r.id);
     if (memRoom) return storeStateToGameRoom(memRoom);
-
     return {
       id: r.id,
       code: (r as typeof r & { invite_code?: string }).invite_code ?? '',
       hostUserId: r.host_user_id,
-      status: 'lobby' as const,
+      status,
       maxPlayers: r.max_players,
       players: [] as RoomPlayer[],
       currentRound: 0,
     } satisfies GameRoom;
-  });
+  }
+
+  const rooms = openRooms.map((r) => dbRowToGameRoom(r, 'lobby'));
+  const yourRooms = rejoinable
+    .filter((r) => !rejoinableIds.has(r.id) ? false : true)
+    .map((r) => dbRowToGameRoom(r, 'in-progress'));
+
+  // The legacy shape (a plain array) is preserved so existing callers
+  // keep working. The wrapped form is opt-in via a query flag — the
+  // lobby uses it to render a separate "your rooms" section.
+  if (req.query['include'] === 'rejoinable') {
+    res.json({ success: true, data: { open: rooms, rejoinable: yourRooms } });
+    return;
+  }
 
   res.json({ success: true, data: rooms });
 });

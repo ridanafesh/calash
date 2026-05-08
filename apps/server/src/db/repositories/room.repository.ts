@@ -79,6 +79,28 @@ export class RoomRepository {
     return rows[0] ?? null;
   }
 
+  /**
+   * Rooms where this user has a substituted seat waiting for them — the
+   * user explicitly left mid-game, the seat was bot-flipped, but the
+   * row is still open (left_at IS NULL) and is_human_substitute is true.
+   * The lobby uses this to show "your in-progress games" as a rejoinable
+   * list, separate from the public open-rooms feed.
+   */
+  async findRejoinableRoomsForUser(userId: string): Promise<GameRoomRow[]> {
+    const { rows } = await this.db.query<GameRoomRow>(
+      `SELECT r.*
+       FROM game_rooms r
+       JOIN game_room_players grp ON grp.room_id = r.id
+       WHERE grp.user_id = $1
+         AND r.status = 'in_progress'
+         AND grp.left_at IS NULL
+         AND grp.is_human_substitute = true
+       ORDER BY r.created_at DESC`,
+      [userId],
+    );
+    return rows;
+  }
+
   async create(data: {
     hostUserId: string;
     maxPlayers: number;

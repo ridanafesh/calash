@@ -335,4 +335,10 @@ export const ar: Record<string, string> = {
   'guest.popup.error.empty': 'يرجى إدخال اسم.',
   'guest.popup.error.tooLong': 'يجب ألا يزيد الاسم عن {{n}} حرفًا.',
   'guest.popup.error.saveFailed': 'تعذّر الحفظ. يرجى المحاولة مرة أخرى.',
+
+  // ─── Lobby — rejoinable rooms ────────────────────────────────────────────
+  'lobby.rejoinable.title': 'ألعابك الجارية',
+  'lobby.rejoinable.badge': 'بانتظار عودتك',
+  'lobby.rejoinable.hint': 'هناك بوت يلعب مكانك. عُد لاستعادة مقعدك.',
+  'lobby.rejoinable.action': 'العودة',
 };

@@ -130,6 +130,13 @@ export function reclaimSeatFromBot(slot: PlayerSlot, socketId: string, displayNa
   slot.isBot = false;
   slot.botDifficulty = undefined;
   slot.socketId = socketId;
+  // Clear the substitute flag — the original human is back and the
+  // seat is once again a live human seat. If they leave again, the
+  // mid-game-leave path will set this back to true (and a fresh
+  // substitution will fire), which is exactly what was broken before:
+  // the flag stuck around and the second leave was treated as "bot
+  // already left" so no substitution happened.
+  slot.isHumanSubstitute = false;
   // Don't touch isReady — the round is in-progress, ready state is
   // moot. If the room ever returns to lobby (next round) the normal
   // ready toggle handles it.
@@ -172,52 +179,87 @@ export async function restorePlayerToRoom(
   // Check in-memory store first.
   let room = roomStore.getRoomForUser(playerId);
 
-  // If not in memory, check DB for an active room.
+  // If not in memory under this user, check DB for an active room.
   if (!room) {
     const dbRoom = await db.rooms.findActiveRoomForUser(playerId);
     if (!dbRoom) return;
 
-    // Rebuild minimal in-memory entry for this room.
-    const full = await db.rooms.findWithPlayers(dbRoom.id);
-    if (!full) return;
-
-    // We only need to rebuild from the DB if the room isn't already in memory.
-    // This can happen after a server restart.  For now we skip rebuilding the
-    // full RoundState (that would require re-hydrating game-core from DB rows)
-    // and just restore the lobby state.
-    const userMeta = await fetchUserMeta(full.players.map((p) => p.user_id));
-    const newRoom: RoomState = {
-      roomId: full.id,
-      inviteCode: (full as typeof full & { invite_code?: string }).invite_code ?? '',
-      isPrivate: (full as typeof full & { is_private?: boolean }).is_private ?? false,
-      hostUserId: full.host_user_id,
-      status: full.status === 'in_progress' ? 'in-progress' : full.status === 'finished' ? 'finished' : 'lobby',
-      maxPlayers: full.max_players,
-      players: full.players
-        .filter((p) => p.left_at === null)
-        .map((p) => {
-          const meta = userMeta.get(p.user_id);
-          return {
-            userId: p.user_id,
-            seatIndex: p.seat_index,
-            isReady: (p as typeof p & { is_ready?: boolean }).is_ready ?? false,
-            socketId: null,
-            displayName: meta?.displayName ?? p.user_id,
-            isBot: meta?.isBot ?? false,
-            ...(meta?.isBot ? { botDifficulty: 'easy' as BotDifficulty } : {}),
-            isWaiting: (p as typeof p & { is_waiting?: boolean }).is_waiting ?? false,
-          };
-        }),
-      round: null,
-    };
-    roomStore.set(newRoom);
-    room = newRoom;
+    // CRITICAL: re-check whether the room itself is in memory. The
+    // user-index can be empty for this player (e.g. they were
+    // untracked when leave-substitute fired) while the ROOM is still
+    // alive in memory because the other players are mid-round.
+    // Rebuilding from DB and calling roomStore.set() in that case
+    // would clobber the live RoundState. Instead, look up the room
+    // by id and operate on the existing in-memory copy.
+    const inMemoryRoom = roomStore.get(dbRoom.id);
+    if (inMemoryRoom) {
+      room = inMemoryRoom;
+    } else {
+      // Room is fully cold (server restart) — safe to rebuild minimal
+      // state from DB. We deliberately do not rehydrate the round
+      // state here; that's a larger refactor for the cold-restart path.
+      const full = await db.rooms.findWithPlayers(dbRoom.id);
+      if (!full) return;
+      const userMeta = await fetchUserMeta(full.players.map((p) => p.user_id));
+      const newRoom: RoomState = {
+        roomId: full.id,
+        inviteCode: (full as typeof full & { invite_code?: string }).invite_code ?? '',
+        isPrivate: (full as typeof full & { is_private?: boolean }).is_private ?? false,
+        hostUserId: full.host_user_id,
+        status: full.status === 'in_progress' ? 'in-progress' : full.status === 'finished' ? 'finished' : 'lobby',
+        maxPlayers: full.max_players,
+        players: full.players
+          .filter((p) => p.left_at === null)
+          .map((p) => {
+            const meta = userMeta.get(p.user_id);
+            // is_human_substitute means a human left mid-game and the
+            // seat was bot-flipped. Carry that flag in via the in-memory
+            // model so the seat shows up as a bot (driven by the bot
+            // loop) and so future fresh joiners can't replace it.
+            const isSubstitute =
+              (p as typeof p & { is_human_substitute?: boolean }).is_human_substitute ?? false;
+            const isBot = (meta?.isBot ?? false) || isSubstitute;
+            return {
+              userId: p.user_id,
+              seatIndex: p.seat_index,
+              isReady: (p as typeof p & { is_ready?: boolean }).is_ready ?? false,
+              socketId: null,
+              displayName: meta?.displayName ?? p.user_id,
+              isBot,
+              ...(isBot ? { botDifficulty: 'easy' as BotDifficulty } : {}),
+              ...(isSubstitute ? { isHumanSubstitute: true } : {}),
+              isWaiting: (p as typeof p & { is_waiting?: boolean }).is_waiting ?? false,
+            };
+          }),
+        round: null,
+      };
+      roomStore.set(newRoom);
+      room = newRoom;
+    }
   }
 
   if (!room) return;
 
   const player = room.players.find((p) => p.userId === playerId);
   if (!player) return;
+
+  // CRITICAL: a substituted seat is NOT a live human. The original
+  // human explicitly left and the seat was flipped to a bot. They must
+  // come back through the explicit rejoin flow (room:join with their
+  // chosen path), not via the auto-restore the socket-handshake fires.
+  //
+  // Without this guard the leaver would silently re-bind to the seat
+  // on the very next page refresh — and because the seat is still
+  // marked isBot=true, their next "Leave" would skip the substitute
+  // path (which gates on !slot.isBot), so the bot-replacement also
+  // appeared to "stop working after the first leave".
+  if (player.isBot && player.isHumanSubstitute) {
+    // The user-index might have been re-set by an earlier set() call
+    // when the room was rebuilt from DB above; clear it so the lobby
+    // page doesn't auto-redirect into the room.
+    roomStore.untrackUser(playerId);
+    return;
+  }
 
   // Restore socket to the room channel.
   roomStore.updateSocket(room.roomId, playerId, socket.id);
@@ -430,16 +472,36 @@ async function joinRoom(
 
   // ── Reconnect / reclaim path ─────────────────────────────────────────
   // Player already has a slot in this room. Two sub-cases:
-  //   - existing.isBot === false: ordinary reconnect (refresh / dropped
-  //     socket / second tab). Update the socket, push state, done.
-  //   - existing.isBot === true: the seat was substituted because this
-  //     player previously left mid-game. Flip it back to a human seat
-  //     and cancel any pending bot timer.
+  //   - the slot is a HUMAN substitute (isBot && isHumanSubstitute):
+  //     this player previously left mid-game and the seat was
+  //     bot-flipped. Flip it back, persist the cleared flag, re-track
+  //     the user in the in-memory index, and cancel any pending bot
+  //     turn. After this they can leave again and the substitute
+  //     path will fire fresh (the bug before this fix was that the
+  //     flag stuck around so leave #2 saw isBot=true and skipped).
+  //   - otherwise: ordinary reconnect (refresh / dropped socket /
+  //     second tab). Update the socket, push state, done.
+  //
+  // We deliberately do NOT treat host-created bots that happen to
+  // share the user_id as reclaim targets — replaceBotWithHuman
+  // rewrites those user_ids on takeover, so by the time a fresh
+  // human shows up here, no slot will match their playerId.
   const existing = room.players.find((p) => p.userId === playerId);
   if (existing) {
-    const wasBotSubstitute = existing.isBot;
+    const wasBotSubstitute = existing.isBot && !!existing.isHumanSubstitute;
     if (wasBotSubstitute) {
       reclaimSeatFromBot(existing, socket.id, displayName ?? existing.displayName);
+      // Persist the cleared substitute flag so a server restart
+      // mid-game doesn't re-mark this seat as substitute.
+      await pool.query(
+        'UPDATE game_room_players SET is_human_substitute = false WHERE room_id = $1 AND user_id = $2',
+        [room.roomId, playerId],
+      );
+      // Re-track the user in the in-memory index — leave-substitute
+      // dropped them so restorePlayerToRoom wouldn't auto-rejoin.
+      // Now that they're an active human again, restorePlayerToRoom
+      // should work for them on subsequent socket drops.
+      roomStore.trackUser(playerId, room.roomId);
       const { cancelBotTimer } = await import('./game.js');
       cancelBotTimer(room.roomId);
     } else {
@@ -840,10 +902,37 @@ export async function handleRoomLeave(
   // The user's `game_room_players` row stays open with left_at = NULL so
   // they can rejoin and reclaim. socket.data.roomId is cleared and the
   // socket leaves the channel; the human's UI navigates back to the lobby.
+  //
+  // Three additional things matter here, all of which were missing in
+  // an earlier version and produced the "auto-rejoins on refresh and
+  // can't substitute again" bug:
+  //
+  //   1. Set slot.isHumanSubstitute = true so future fresh joiners
+  //      can't steal this seat (replaceableBots filters it out) and
+  //      the lobby's rejoin listing can find it.
+  //   2. Persist that flag to game_room_players.is_human_substitute
+  //      so a server restart doesn't lose it.
+  //   3. Untrack the user from the in-memory user-index so
+  //      restorePlayerToRoom does NOT auto-rejoin them on next socket
+  //      handshake. The DB row is what they rejoin AGAINST when they
+  //      explicitly click rejoin from the lobby; the in-memory index
+  //      is for active connections only.
   if (room.status === 'in-progress') {
     const slot = room.players.find((p) => p.userId === playerId);
     if (slot && !slot.isBot) {
       const flipped = substituteSeatWithBot(slot);
+      slot.isHumanSubstitute = true;
+      await pool.query(
+        'UPDATE game_room_players SET is_human_substitute = true WHERE room_id = $1 AND user_id = $2',
+        [roomId, playerId],
+      );
+      // Drop the user-index mapping so this socket (and any future
+      // socket from the same user) no longer auto-rejoins via
+      // restorePlayerToRoom. Explicit rejoin via room:join still
+      // finds the slot and reclaims it (joinRoom reads room.players
+      // directly, not the user index).
+      roomStore.untrackUser(playerId);
+
       socket.data.roomId = undefined;
       await socket.leave(roomId);
       broadcastRoomUpdate(io, room);

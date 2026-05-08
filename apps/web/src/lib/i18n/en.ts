@@ -338,4 +338,10 @@ export const en: Record<string, string> = {
   'guest.popup.error.empty': 'Please enter a name.',
   'guest.popup.error.tooLong': 'Name must be {{n}} characters or fewer.',
   'guest.popup.error.saveFailed': "Couldn't save. Please try again.",
+
+  // ─── Lobby — rejoinable rooms ────────────────────────────────────────────
+  'lobby.rejoinable.title': 'Your in-progress games',
+  'lobby.rejoinable.badge': 'Awaiting your return',
+  'lobby.rejoinable.hint': 'A bot is playing your seat. Rejoin to take it back.',
+  'lobby.rejoinable.action': 'Rejoin',
 };

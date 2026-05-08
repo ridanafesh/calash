@@ -102,6 +102,45 @@ describe('reclaimSeatFromBot', () => {
   });
 });
 
+describe('reclaim clears isHumanSubstitute', () => {
+  // Regression: an earlier bug left isHumanSubstitute = true after
+  // reclaim. The result was that on the user's NEXT leave, the
+  // mid-game-leave path saw slot.isBot === false (we flipped it
+  // back) but isHumanSubstitute was already true — and worse, an
+  // even earlier path actually skipped the substitute branch
+  // entirely on the second leave. These tests pin the round-trip
+  // contract: the reclaimed seat must look like a brand-new human
+  // seat to the leave path.
+  it('reclaim sets isHumanSubstitute back to false', () => {
+    const slot = makeHumanSlot();
+    substituteSeatWithBot(slot);
+    slot.isHumanSubstitute = true; // leave-substitute would set this
+    reclaimSeatFromBot(slot, 'socket-back', 'Alice');
+    expect(slot.isHumanSubstitute).toBe(false);
+  });
+
+  it('substitute → reclaim → substitute again works', () => {
+    const slot = makeHumanSlot();
+
+    // Leave #1
+    expect(substituteSeatWithBot(slot)).toBe(true);
+    slot.isHumanSubstitute = true;
+    expect(slot.isBot).toBe(true);
+    expect(slot.isHumanSubstitute).toBe(true);
+
+    // Rejoin
+    reclaimSeatFromBot(slot, 'socket-1', 'Alice');
+    expect(slot.isBot).toBe(false);
+    expect(slot.isHumanSubstitute).toBe(false);
+
+    // Leave #2 — must still work, was the original reported bug.
+    expect(substituteSeatWithBot(slot)).toBe(true);
+    slot.isHumanSubstitute = true;
+    expect(slot.isBot).toBe(true);
+    expect(slot.isHumanSubstitute).toBe(true);
+  });
+});
+
 describe('seat-substitution → reclaim invariants', () => {
   it('seat count is preserved (the slot stays in any list it lives in)', () => {
     // A 4-player room: substitute one seat, the room still has 4 slots.
