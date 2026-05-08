@@ -72,6 +72,8 @@ export const en: Record<string, string> = {
   'lobby.inProgress': 'In progress',
   'lobby.botSeatAvailable': 'Bot seat available',
   'lobby.full': 'Full',
+  'lobby.refreshRooms': 'Refresh Rooms',
+  'lobby.refreshRoomsTitle': 'Reload the latest open rooms',
   'lobby.join': 'Join',
   'lobby.leaderboard': 'Leaderboard',
   'lobby.history': 'History',

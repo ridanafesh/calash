@@ -883,6 +883,58 @@ export async function handleRoomJoinByCode(
   await joinRoom(socket, io, room, { code: normalised, choice });
 }
 
+/**
+ * Tear a room down completely. Called when the last human leaves —
+ * the rule is "no humans, no room". Idempotent: safe to call twice
+ * because both DB.removePlayer and roomStore.delete are no-ops on
+ * already-cleared state.
+ *
+ * Triggering paths today:
+ *   - lobby/finished leave when last human goes
+ *   - mid-game leave-substitute when the leaver was the last human
+ *
+ * Substituted-bot seats are torn down too: those rows correspond to
+ * humans who had explicitly left, and the spec says when no humans
+ * remain the room is gone — they can't reclaim a deleted room, and
+ * have to create a new one.
+ */
+async function closeAbandonedRoom(
+  room: RoomState,
+  io: CalashServer,
+  reason: string,
+): Promise<void> {
+  const roomId = room.roomId;
+  for (const slot of room.players) {
+    await db.rooms.removePlayer(roomId, slot.userId).catch(() => {});
+    roomStore.untrackUser(slot.userId);
+  }
+  room.players = [];
+  await db.rooms.updateStatus(roomId, 'abandoned');
+  roomStore.delete(roomId);
+  const { cancelBotTimer } = await import('./game.js');
+  cancelBotTimer(roomId);
+  // Notify any sockets that were still in the room channel — bots
+  // have no socket so there's usually nothing to wake here, but if a
+  // late reconnect arrives mid-close it gets a final close signal.
+  io.to(roomId).emit('room:error', {
+    code: 'ROOM_CLOSED',
+    message: 'This room was closed because no human players remain.',
+  });
+  logRoom('close', {
+    action: 'close',
+    roomId,
+    roomCode: room.inviteCode,
+    reason,
+    activePlayerCount: 0,
+  });
+}
+
+/** True if the room currently has at least one live human seat
+ *  (not a bot, not a substituted bot). */
+function hasAnyHuman(room: RoomState): boolean {
+  return room.players.some((p) => !p.isBot);
+}
+
 // ─── room:leave ──────────────────────────────────────────────────────────────
 
 export async function handleRoomLeave(
@@ -935,6 +987,30 @@ export async function handleRoomLeave(
 
       socket.data.roomId = undefined;
       await socket.leave(roomId);
+
+      // If this was the LAST human, the room is now all-bots. Per the
+      // "no humans, no room" rule the room must close immediately —
+      // skip the broadcast and bot-driver scheduling and go straight
+      // to teardown. Substituted-bot rows for previously-departed
+      // humans are torn down with the room; their reclaim path goes
+      // away (they have to create a new room).
+      if (!hasAnyHuman(room)) {
+        await closeAbandonedRoom(room, io, 'last-human-left-mid-game');
+        logRoom('leave-substitute', {
+          action: 'leave',
+          roomId,
+          roomCode: room.inviteCode,
+          userId: playerId,
+          seatIndex: slot.seatIndex,
+          status: 'in-progress',
+          activePlayerCount: 0,
+          flipped,
+          substitutedTurn: false,
+          closedRoom: true,
+        });
+        return;
+      }
+
       broadcastRoomUpdate(io, room);
 
       // If it's currently this seat's turn, kick the bot driver so the
@@ -970,30 +1046,16 @@ export async function handleRoomLeave(
   socket.data.roomId = undefined;
   await socket.leave(roomId);
 
-  // If only bots remain, abandon the room — bots can't run a game alone.
-  const remainingHumans = room.players.filter((p) => !p.isBot);
-  if (remainingHumans.length === 0) {
-    for (const bot of room.players) {
-      await db.rooms.removePlayer(roomId, bot.userId).catch(() => {});
-      roomStore.untrackUser(bot.userId);
-    }
-    room.players = [];
-    await db.rooms.updateStatus(roomId, 'abandoned');
-    roomStore.delete(roomId);
-    const { cancelBotTimer } = await import('./game.js');
-    cancelBotTimer(roomId);
-    logRoom('close', {
-      action: 'close',
-      roomId,
-      roomCode: room.inviteCode,
-      userId: playerId,
-      reason: 'no-humans-remaining',
-      activePlayerCount: 0,
-    });
+  // No humans left? Tear down the whole room (bots-only is not a
+  // valid persistent state; closeAbandonedRoom also removes any
+  // remaining bot rows + cancels the bot timer).
+  if (!hasAnyHuman(room)) {
+    await closeAbandonedRoom(room, io, 'no-humans-remaining');
     return;
   }
 
   // Transfer host to the first remaining HUMAN if the host left.
+  const remainingHumans = room.players.filter((p) => !p.isBot);
   if (room.hostUserId === playerId) {
     room.hostUserId = remainingHumans[0].userId;
   }

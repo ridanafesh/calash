@@ -73,6 +73,8 @@ export const ar: Record<string, string> = {
   'lobby.inProgress': 'قيد اللعب',
   'lobby.botSeatAvailable': 'مقعد بوت متاح',
   'lobby.full': 'ممتلئة',
+  'lobby.refreshRooms': 'تحديث الغرف',
+  'lobby.refreshRoomsTitle': 'تحديث قائمة الغرف الحالية',
   'lobby.join': 'انضمام',
   'lobby.leaderboard': 'لوحة الصدارة',
   'lobby.history': 'السجل',

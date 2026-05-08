@@ -155,6 +155,8 @@ describe('GET /api/rooms', () => {
   });
 
   it('locked rooms are visible (the lock is enforced at JOIN, not list)', async () => {
+    // Outsider asking; the room is locked → code must be redacted but
+    // the room itself should still appear with the lock flag.
     const token = makeToken('outsider');
     mockRoomsRepo.findVisibleRooms.mockResolvedValue([
       {
@@ -176,7 +178,54 @@ describe('GET /api/rooms', () => {
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(1);
     expect(res.body.data[0].isPrivate).toBe(true);
+    // Outsider must NOT see the locked-room code.
+    expect(res.body.data[0].code).toBe('');
+  });
+
+  it('locked-room code IS visible to the host (the creator can see their own code)', async () => {
+    const token = makeToken('host-1');
+    mockRoomsRepo.findVisibleRooms.mockResolvedValue([
+      {
+        id: 'room-locked',
+        host_user_id: 'host-1',
+        invite_code: 'SECRET',
+        is_private: true,
+        status: 'lobby',
+        max_players: 4,
+        created_at: new Date(),
+      },
+    ]);
+    mockRoomsRepo.findRejoinableRoomsForUser.mockResolvedValue([]);
+    mockPool.query.mockResolvedValueOnce({ rows: [] });
+
+    const res = await request(app)
+      .get('/api/rooms')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
     expect(res.body.data[0].code).toBe('SECRET');
+  });
+
+  it('open-room codes are NOT redacted (always public)', async () => {
+    const token = makeToken('outsider');
+    mockRoomsRepo.findVisibleRooms.mockResolvedValue([
+      {
+        id: 'room-open',
+        host_user_id: 'someone',
+        invite_code: 'OPEN12',
+        is_private: false,
+        status: 'lobby',
+        max_players: 4,
+        created_at: new Date(),
+      },
+    ]);
+    mockRoomsRepo.findRejoinableRoomsForUser.mockResolvedValue([]);
+    mockPool.query.mockResolvedValueOnce({ rows: [] });
+
+    const res = await request(app)
+      .get('/api/rooms')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data[0].code).toBe('OPEN12');
   });
 
   it('with ?include=rejoinable, returns wrapped object with both lists', async () => {

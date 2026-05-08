@@ -79,6 +79,19 @@ export class RoomRepository {
       `SELECT r.*
        FROM game_rooms r
        WHERE r.status IN ('lobby', 'in_progress')
+         -- "No humans, no room" — defensive: the leave/disconnect
+         -- handlers tear down empty rooms, but if any slip through
+         -- (server crash mid-leave, etc.) we still hide them from
+         -- the lobby. A row counts as a human when the user is not
+         -- a bot. Substituted-bot rows are bot rows here.
+         AND EXISTS (
+           SELECT 1
+           FROM game_room_players grp
+           JOIN users u ON u.id = grp.user_id
+           WHERE grp.room_id = r.id
+             AND grp.left_at IS NULL
+             AND u.is_bot = false
+         )
          AND (
            -- empty seat available
            (SELECT COUNT(*) FROM game_room_players grp

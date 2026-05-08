@@ -74,6 +74,37 @@ function LobbyInner() {
     if (room) router.push(`/rooms/${room.id}`);
   }, [room, router]);
 
+  // Manual-refresh state — separate from the silent background poll
+  // so the button can show a spinner / brief flash without yanking
+  // the empty-state placeholder.
+  const [refreshing, setRefreshing] = useState(false);
+
+  // load() is defined inside an effect so the auto-poll can clean
+  // itself up cleanly. The exported handleRefresh closure is what
+  // the button calls; it runs the same fetch but tracks a separate
+  // 'refreshing' flag so we don't blink the loading spinner over
+  // the existing list.
+  async function fetchRooms(): Promise<void> {
+    try {
+      const data = await apiClient.getRoomsWithRejoinable();
+      setRooms(data.open);
+      setRejoinableRooms(data.rejoinable);
+      setFetchError('');
+    } catch {
+      setFetchError('Could not load rooms.');
+    }
+  }
+
+  async function handleRefresh(): Promise<void> {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await fetchRooms();
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
   useEffect(() => {
     let cancelled = false;
     async function load() {
@@ -151,6 +182,16 @@ function LobbyInner() {
           >
             {startingVsBot ? <><span className="spinner" />{t('common.loading')}</> : `🤖 ${t('lobby.playVsBots')}`}
           </button>
+          <button
+            type="button"
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="btn btn-ghost btn-lg"
+            title={t('lobby.refreshRoomsTitle')}
+            aria-label={t('lobby.refreshRooms')}
+          >
+            {refreshing ? <><span className="spinner" />{t('common.loading')}</> : `🔄 ${t('lobby.refreshRooms')}`}
+          </button>
         </div>
 
         {rejoinableRooms.length > 0 && (
@@ -163,9 +204,15 @@ function LobbyInner() {
                 <div key={r.id} className="surface row" style={{ justifyContent: 'space-between', gap: 12 }}>
                   <div style={{ minWidth: 0 }}>
                     <div className="row" style={{ gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
-                      <span className="room-code" style={{ fontSize: '0.9rem', letterSpacing: '0.15em', padding: '2px 8px' }}>
-                        {r.code}
-                      </span>
+                      {/* Show the code only when the server returned one.
+                          Locked rooms with a non-creator viewer get
+                          code='' so the chip is hidden — non-hosts have
+                          to enter it via the lock prompt. */}
+                      {r.code && (
+                        <span className="room-code" style={{ fontSize: '0.9rem', letterSpacing: '0.15em', padding: '2px 8px' }}>
+                          {r.code}
+                        </span>
+                      )}
                       <span className="badge badge-accent">⏳ {t('lobby.rejoinable.badge')}</span>
                     </div>
                     <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
@@ -210,9 +257,15 @@ function LobbyInner() {
                 <div key={r.id} className="surface row" style={{ justifyContent: 'space-between', gap: 12 }}>
                   <div style={{ minWidth: 0 }}>
                     <div className="row" style={{ gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
-                      <span className="room-code" style={{ fontSize: '0.9rem', letterSpacing: '0.15em', padding: '2px 8px' }}>
-                        {r.code}
-                      </span>
+                      {/* Show the code only when the server returned one.
+                          Locked rooms with a non-creator viewer get
+                          code='' so the chip is hidden — non-hosts have
+                          to enter it via the lock prompt. */}
+                      {r.code && (
+                        <span className="room-code" style={{ fontSize: '0.9rem', letterSpacing: '0.15em', padding: '2px 8px' }}>
+                          {r.code}
+                        </span>
+                      )}
                       {r.isPrivate ? (
                         <span className="badge badge-neutral" title={t('lobby.lockedRoomTitle')}>
                           🔒 {t('lobby.locked')}

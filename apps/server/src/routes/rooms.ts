@@ -192,10 +192,23 @@ router.get('/rooms', requireAuth, async (req, res) => {
     } satisfies GameRoom;
   }
 
+  // Redact the invite code on locked rooms unless the requesting
+  // user is the room creator. The lock badge stays visible (the
+  // client renders it from isPrivate), but other users see an empty
+  // code and have to obtain it from the host out-of-band — that's
+  // the whole point of a locked room. Open rooms always expose the
+  // code (they're public).
+  function redactCodeForViewer(r: GameRoom): GameRoom {
+    if (!r.isPrivate) return r;
+    if (r.hostUserId === userId) return r;
+    return { ...r, code: '' };
+  }
+
   const publicRooms = visibleRooms
     .filter((r) => !rejoinableIds.has(r.id))
-    .map(dbRowToGameRoom);
-  const yourRooms = rejoinable.map(dbRowToGameRoom);
+    .map(dbRowToGameRoom)
+    .map(redactCodeForViewer);
+  const yourRooms = rejoinable.map(dbRowToGameRoom).map(redactCodeForViewer);
 
   // The legacy shape (a plain array) is preserved so existing callers
   // keep working. The wrapped form is opt-in via a query flag — the
@@ -229,10 +242,17 @@ async function fetchPlayerMeta(userIds: string[]): Promise<Map<string, { display
 
 router.get('/rooms/:id', requireAuth, async (req, res) => {
   const { id } = req.params;
+  const requesterId = req.auth!.userId;
+
+  function redactCodeForViewer(r: GameRoom): GameRoom {
+    if (!r.isPrivate) return r;
+    if (r.hostUserId === requesterId) return r;
+    return { ...r, code: '' };
+  }
 
   const memRoom = roomStore.get(id);
   if (memRoom) {
-    res.json({ success: true, data: storeStateToGameRoom(memRoom) });
+    res.json({ success: true, data: redactCodeForViewer(storeStateToGameRoom(memRoom)) });
     return;
   }
 
@@ -259,6 +279,7 @@ router.get('/rooms/:id', requireAuth, async (req, res) => {
   const room: GameRoom = {
     id: dbRoom.id,
     code: (dbRoom as typeof dbRoom & { invite_code?: string }).invite_code ?? '',
+    isPrivate: (dbRoom as typeof dbRoom & { is_private?: boolean }).is_private ?? false,
     hostUserId: dbRoom.host_user_id,
     status: dbRoom.status === 'in_progress' ? 'in-progress' : dbRoom.status === 'finished' ? 'finished' : 'lobby',
     maxPlayers: dbRoom.max_players,
@@ -266,7 +287,7 @@ router.get('/rooms/:id', requireAuth, async (req, res) => {
     currentRound: 0,
   };
 
-  res.json({ success: true, data: room });
+  res.json({ success: true, data: redactCodeForViewer(room) });
 });
 
 // ─── GET /api/rooms/join/:code ────────────────────────────────────────────────

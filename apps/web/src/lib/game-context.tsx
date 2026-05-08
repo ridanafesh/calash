@@ -219,7 +219,19 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       // no longer relevant, so dismiss any open picker.
       setJoinOptions(null);
     });
-    s.on('room:error', setRoomError);
+    s.on('room:error', (err) => {
+      setRoomError(err);
+      // ROOM_CLOSED is the server signaling that the room was torn
+      // down (e.g. last human left). Clear the local room/round
+      // state so the rooms/[id] page falls into its error fallback
+      // instead of trying to render a stale room.
+      if (err.code === 'ROOM_CLOSED') {
+        setRoom(null);
+        setGameState(null);
+        setHand([]);
+        setMyDrawnCard(null);
+      }
+    });
     // Server tells us "you can join via bot replacement OR empty seat —
     // pick one". Stash the prompt so the lobby UI can render the picker;
     // the user's selection re-emits room:join with the chosen path.
