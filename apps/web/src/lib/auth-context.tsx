@@ -12,6 +12,15 @@ interface AuthContextValue {
   user: UserProfile | null;
   token: string | null;
   isLoading: boolean;
+  /**
+   * True for one render cycle right after `loginAsGuest()` resolves —
+   * the GuestNameGate watches this so the popup only appears immediately
+   * after the user actively clicks "Play as Guest", NOT on every page
+   * load that happens to restore a guest token from localStorage.
+   * Cleared by `acknowledgeGuestPrompt()` once the popup is shown.
+   */
+  pendingGuestNamePrompt: boolean;
+  acknowledgeGuestPrompt: () => void;
   loginWithPassword: (email: string, password: string) => Promise<void>;
   loginWithGoogle: (credential: string) => Promise<void>;
   loginAsGuest: () => Promise<void>;
@@ -29,6 +38,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [pendingGuestNamePrompt, setPendingGuestNamePrompt] = useState(false);
+
+  const acknowledgeGuestPrompt = useCallback(() => {
+    setPendingGuestNamePrompt(false);
+  }, []);
 
   function persist(newToken: string, newUser: UserProfile) {
     localStorage.setItem('token', newToken);
@@ -79,6 +93,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   async function loginAsGuest() {
     const data = await apiClient.loginAsGuest();
     persist(data.token, data.user);
+    // Only fresh guest signups should trigger the name popup. Returning
+    // guests whose token was restored from localStorage on app boot
+    // never go through this code path, so they are not prompted.
+    setPendingGuestNamePrompt(true);
   }
 
   function logout() {
@@ -86,11 +104,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     localStorage.removeItem('token');
     setToken(null);
     setUser(null);
+    setPendingGuestNamePrompt(false);
   }
 
   return (
     <AuthContext.Provider
-      value={{ user, token, isLoading, loginWithPassword, loginWithGoogle, loginAsGuest, logout, refreshUser }}
+      value={{
+        user,
+        token,
+        isLoading,
+        pendingGuestNamePrompt,
+        acknowledgeGuestPrompt,
+        loginWithPassword,
+        loginWithGoogle,
+        loginAsGuest,
+        logout,
+        refreshUser,
+      }}
     >
       {children}
     </AuthContext.Provider>

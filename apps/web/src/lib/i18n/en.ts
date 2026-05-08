@@ -333,6 +333,7 @@ export const en: Record<string, string> = {
   'guest.popup.hint': "We've given you a name. Keep it or change it — this is what other players will see.",
   'guest.popup.placeholder': 'Display name',
   'guest.popup.save': 'Save',
+  'guest.popup.continue': 'Continue',
   'guest.popup.saving': 'Saving…',
   'guest.popup.error.empty': 'Please enter a name.',
   'guest.popup.error.tooLong': 'Name must be {{n}} characters or fewer.',

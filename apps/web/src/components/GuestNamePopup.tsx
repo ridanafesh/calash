@@ -56,6 +56,16 @@ export function GuestNamePopup({ onClose }: Props) {
       return;
     }
     setError(null);
+
+    // No-op when the user kept the server-generated default. Skipping
+    // the network call avoids a "no fields to update" round-trip and
+    // makes the Continue path instant. The socket already has the
+    // default name from handshake, so no reconnect is needed either.
+    if (trimmed === (user?.displayName ?? '').trim()) {
+      onClose();
+      return;
+    }
+
     setSaving(true);
     try {
       await apiClient.updateProfile({ displayName: trimmed });
@@ -140,7 +150,11 @@ export function GuestNamePopup({ onClose }: Props) {
             className="btn btn-primary"
             disabled={saving}
           >
-            {saving ? t('guest.popup.saving') : t('guest.popup.save')}
+            {saving
+              ? t('guest.popup.saving')
+              : name.trim() === (user?.displayName ?? '').trim()
+                ? t('guest.popup.continue')
+                : t('guest.popup.save')}
           </button>
         </div>
       </form>

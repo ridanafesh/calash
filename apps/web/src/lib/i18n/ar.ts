@@ -330,6 +330,7 @@ export const ar: Record<string, string> = {
   'guest.popup.hint': 'لقد أعطيناك اسمًا. احتفظ به أو غيّره — هذا ما سيراه اللاعبون الآخرون.',
   'guest.popup.placeholder': 'اسم العرض',
   'guest.popup.save': 'حفظ',
+  'guest.popup.continue': 'متابعة',
   'guest.popup.saving': 'جارٍ الحفظ…',
   'guest.popup.error.empty': 'يرجى إدخال اسم.',
   'guest.popup.error.tooLong': 'يجب ألا يزيد الاسم عن {{n}} حرفًا.',

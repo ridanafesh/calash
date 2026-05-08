@@ -18,9 +18,16 @@ import { apiUrl } from './server-urls';
 const BASE_URL = apiUrl();
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  // Build the final init explicitly. Spreading `...init` AFTER setting
+  // headers (the previous shape) overwrote the merged headers map and
+  // silently dropped Content-Type whenever the caller passed any of
+  // their own headers — which broke every authenticated PUT/POST that
+  // also set Authorization (e.g. PUT /api/profile would arrive with
+  // an empty body parsed by Express's json middleware).
+  const { headers: callerHeaders, ...rest } = init ?? {};
   const res = await fetch(`${BASE_URL}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
-    ...init,
+    ...rest,
+    headers: { 'Content-Type': 'application/json', ...callerHeaders },
   });
   const json = await res.json();
   if (!res.ok || !json.success) {
