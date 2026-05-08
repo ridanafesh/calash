@@ -9,6 +9,11 @@ const mockPool = {
 const mockRoomsRepo = {
   findActiveRoomForUser: jest.fn(),
   create: jest.fn(),
+  // findVisibleRooms is the new lobby query — returns BOTH lobby and
+  // in-progress rooms with at least one joinable seat path. The old
+  // findOpenRooms is kept as a deprecated alias and not used by the
+  // route anymore.
+  findVisibleRooms: jest.fn(),
   findOpenRooms: jest.fn(),
   // GET /api/rooms now also fetches the caller's rejoinable rooms
   // (in-progress rooms with their seat bot-substituted) so the lobby
@@ -96,7 +101,7 @@ describe('GET /api/rooms', () => {
 
   it('returns 200 with list of rooms', async () => {
     const token = makeToken('user-1');
-    mockRoomsRepo.findOpenRooms.mockResolvedValue([]);
+    mockRoomsRepo.findVisibleRooms.mockResolvedValue([]);
     mockRoomsRepo.findRejoinableRoomsForUser.mockResolvedValue([]);
 
     const res = await request(app)
@@ -105,13 +110,78 @@ describe('GET /api/rooms', () => {
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     // Default response shape (no ?include=rejoinable) is still a flat array
-    // of open rooms — preserved for any older client.
+    // of visible rooms — preserved for any older client.
     expect(Array.isArray(res.body.data)).toBe(true);
+  });
+
+  it('lists in-progress rooms (joining mid-game must not hide the room)', async () => {
+    // The user-reported bug: starting a game with bots removed the
+    // room from the public list, so a second human couldn't see it.
+    // Test that an in-progress room with a host-created bot DOES
+    // appear in the list returned to a fresh user.
+    const token = makeToken('outsider');
+    mockRoomsRepo.findVisibleRooms.mockResolvedValue([
+      {
+        id: 'room-inprog',
+        host_user_id: 'host-1',
+        invite_code: 'ABCDEF',
+        is_private: false,
+        status: 'in_progress',
+        max_players: 4,
+        created_at: new Date(),
+      },
+    ]);
+    mockRoomsRepo.findRejoinableRoomsForUser.mockResolvedValue([]);
+    // pool.query returns the player rows for the in-progress room.
+    mockPool.query.mockResolvedValueOnce({
+      rows: [
+        { room_id: 'room-inprog', user_id: 'host-1', seat_index: 0, is_ready: true, is_human_substitute: false, is_waiting: false, display_name: 'Host', username: 'host', is_bot: false },
+        { room_id: 'room-inprog', user_id: 'bot-1', seat_index: 1, is_ready: true, is_human_substitute: false, is_waiting: false, display_name: 'Easy Bot 1', username: 'bot_1', is_bot: true },
+      ],
+    });
+
+    const res = await request(app)
+      .get('/api/rooms')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0].id).toBe('room-inprog');
+    expect(res.body.data[0].status).toBe('in-progress');
+    // Player slots come back so the client can compute joinability.
+    expect(res.body.data[0].players).toHaveLength(2);
+    const bot = res.body.data[0].players.find((p: { isBot: boolean }) => p.isBot);
+    expect(bot).toBeDefined();
+    expect(bot.isHumanSubstitute).toBeUndefined();
+  });
+
+  it('locked rooms are visible (the lock is enforced at JOIN, not list)', async () => {
+    const token = makeToken('outsider');
+    mockRoomsRepo.findVisibleRooms.mockResolvedValue([
+      {
+        id: 'room-locked',
+        host_user_id: 'host-1',
+        invite_code: 'SECRET',
+        is_private: true,
+        status: 'lobby',
+        max_players: 4,
+        created_at: new Date(),
+      },
+    ]);
+    mockRoomsRepo.findRejoinableRoomsForUser.mockResolvedValue([]);
+    mockPool.query.mockResolvedValueOnce({ rows: [] });
+
+    const res = await request(app)
+      .get('/api/rooms')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0].isPrivate).toBe(true);
+    expect(res.body.data[0].code).toBe('SECRET');
   });
 
   it('with ?include=rejoinable, returns wrapped object with both lists', async () => {
     const token = makeToken('user-1');
-    mockRoomsRepo.findOpenRooms.mockResolvedValue([]);
+    mockRoomsRepo.findVisibleRooms.mockResolvedValue([]);
     mockRoomsRepo.findRejoinableRoomsForUser.mockResolvedValue([
       {
         id: 'room-rejoin',
@@ -123,6 +193,7 @@ describe('GET /api/rooms', () => {
         created_at: new Date(),
       },
     ]);
+    mockPool.query.mockResolvedValueOnce({ rows: [] });
 
     const res = await request(app)
       .get('/api/rooms?include=rejoinable')

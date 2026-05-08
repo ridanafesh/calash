@@ -95,7 +95,26 @@ function LobbyInner() {
     return () => { cancelled = true; clearInterval(id); };
   }, []);
 
-  const openRooms = rooms.filter((r) => r.status === 'lobby');
+  // Render every room the server returned. The /api/rooms endpoint
+  // already excludes finished/abandoned rooms and any room with no
+  // joinable seat path, AND already excludes rooms in the user's
+  // rejoinable list (those go in the section above). So no
+  // extra client-side filtering is needed; doing so here is what
+  // hid in-progress rooms from a fresh joiner.
+  const visibleRooms = rooms;
+
+  function joinabilityFor(r: GameRoom): {
+    hasEmptySeat: boolean;
+    hasReplaceableBot: boolean;
+    joinable: boolean;
+  } {
+    const occupied = r.players.length;
+    const hasEmptySeat = occupied < r.maxPlayers;
+    // Only host-created bots are replaceable. Substituted bots are
+    // reserved for the original human's reclaim.
+    const hasReplaceableBot = r.players.some((p) => p.isBot && !p.isHumanSubstitute);
+    return { hasEmptySeat, hasReplaceableBot, joinable: hasEmptySeat || hasReplaceableBot };
+  }
 
   return (
     <div className="page">
@@ -177,15 +196,16 @@ function LobbyInner() {
           <div className="row" style={{ justifyContent: 'center', padding: '2.5rem' }}>
             <div className="spinner" />
           </div>
-        ) : openRooms.length === 0 ? (
+        ) : visibleRooms.length === 0 ? (
           <div className="surface" style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '2.5rem 1rem' }}>
             <div style={{ fontSize: '2.5rem', marginBottom: 8 }}>🃏</div>
             {t('lobby.empty')}
           </div>
         ) : (
           <div className="col" style={{ gap: '0.6rem' }}>
-            {openRooms.map((r) => {
-              const hasBots = r.players.some((p) => p.isBot);
+            {visibleRooms.map((r) => {
+              const inProgress = r.status === 'in-progress';
+              const { hasReplaceableBot, joinable } = joinabilityFor(r);
               return (
                 <div key={r.id} className="surface row" style={{ justifyContent: 'space-between', gap: 12 }}>
                   <div style={{ minWidth: 0 }}>
@@ -200,9 +220,19 @@ function LobbyInner() {
                       ) : (
                         <span className="badge badge-success">{t('lobby.open')}</span>
                       )}
-                      {hasBots && (
+                      {inProgress && (
+                        <span className="badge badge-warning" style={{ fontSize: '0.7rem' }}>
+                          ▶ {t('lobby.inProgress')}
+                        </span>
+                      )}
+                      {hasReplaceableBot && (
                         <span className="badge badge-accent" style={{ fontSize: '0.7rem' }}>
-                          🤖 {t('waiting.bot')}
+                          🤖 {t('lobby.botSeatAvailable')}
+                        </span>
+                      )}
+                      {!joinable && (
+                        <span className="badge badge-neutral" style={{ fontSize: '0.7rem' }}>
+                          {t('lobby.full')}
                         </span>
                       )}
                     </div>
@@ -216,6 +246,8 @@ function LobbyInner() {
                     onClick={() => startJoin(r)}
                     className="btn btn-primary btn-sm"
                     style={{ flexShrink: 0 }}
+                    disabled={!joinable}
+                    title={!joinable ? t('lobby.full') : undefined}
                   >
                     {r.isPrivate ? '🔒 ' : ''}{t('lobby.join')} →
                   </button>

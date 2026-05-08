@@ -53,6 +53,56 @@ export class RoomRepository {
     return { ...room, players };
   }
 
+  /**
+   * Lobby-visible rooms: BOTH 'lobby' and 'in_progress' rooms whose
+   * seat layout has at least one path a fresh joiner could take —
+   * either an empty seat or a replaceable host-created bot.
+   *
+   * Why this includes in-progress rooms: starting a game must not
+   * make the room disappear from the list. As long as someone could
+   * still take a seat (empty seat or bot replacement), the lobby
+   * shows it. Locked rooms are still listed; the lock is enforced
+   * at JOIN time, not at LIST time.
+   *
+   * The "joinable" predicate inside SQL:
+   *   - empty seat: COUNT(active rows) < max_players
+   *   - replaceable bot: at least one row whose user is a bot AND
+   *     the row is not marked is_human_substitute (substitutes are
+   *     reserved for the original human's reclaim flow).
+   *
+   * Finished / abandoned rooms are excluded. left_at IS NOT NULL rows
+   * are excluded from the seat count so a leaver's vacated seat
+   * counts as empty again.
+   */
+  async findVisibleRooms(): Promise<GameRoomRow[]> {
+    const { rows } = await this.db.query<GameRoomRow>(
+      `SELECT r.*
+       FROM game_rooms r
+       WHERE r.status IN ('lobby', 'in_progress')
+         AND (
+           -- empty seat available
+           (SELECT COUNT(*) FROM game_room_players grp
+              WHERE grp.room_id = r.id AND grp.left_at IS NULL) < r.max_players
+           OR
+           -- replaceable host-created bot present
+           EXISTS (
+             SELECT 1
+             FROM game_room_players grp
+             JOIN users u ON u.id = grp.user_id
+             WHERE grp.room_id = r.id
+               AND grp.left_at IS NULL
+               AND u.is_bot = true
+               AND grp.is_human_substitute = false
+           )
+         )
+       ORDER BY r.created_at DESC
+       LIMIT 50`,
+    );
+    return rows;
+  }
+
+  /** @deprecated Use findVisibleRooms — name kept for callers that
+   *  truly want lobby-only rooms (none currently). */
   async findOpenRooms(): Promise<GameRoomRow[]> {
     const { rows } = await this.db.query<GameRoomRow>(
       `SELECT r.*

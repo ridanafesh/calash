@@ -149,6 +149,16 @@ export interface RoomPlayer {
   /** Set when isBot is true. Indicates which strategy the bot uses. */
   botDifficulty?: BotDifficulty;
   /**
+   * True when this seat is a bot stand-in for a human who left mid-game.
+   * Reserved for the original human's reclaim flow — fresh joiners
+   * cannot replace this bot. The lobby uses the flag to compute
+   * joinability correctly: a room full of human-substitute bots is
+   * NOT replaceable from outside.
+   *
+   * Only meaningful when isBot is true.
+   */
+  isHumanSubstitute?: boolean;
+  /**
    * True when the player joined a fresh empty seat WHILE a round was
    * already in progress. They hold the seat but don't deal/play this
    * round — they enter on the next round transition. Cleared by
