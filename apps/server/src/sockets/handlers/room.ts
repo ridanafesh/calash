@@ -21,19 +21,96 @@ type CalashServer = Server<ClientToServerEvents, ServerToClientEvents, InterServ
 
 const db = createDatabaseService(pool);
 
+// ─── Disconnect grace timers ─────────────────────────────────────────────────
+//
+// When a human's socket drops without a deliberate Leave, we don't
+// immediately remove their seat — a refresh, a brief network blip, or
+// switching tabs all look like disconnects. We give the user
+// GRACE_PERIOD_MS to reconnect; if they do, the timer is cancelled
+// and life continues. If they don't, the timer fires and we run the
+// same path as if they had explicitly left (substitute mid-game, or
+// remove from lobby; close the room if they were the last human).
+//
+// The timer is keyed on `${roomId}::${userId}` so the same user
+// disconnecting from two rooms (shouldn't happen, but) doesn't cross
+// streams.
+
+const GRACE_PERIOD_MS = 30_000;
+
+interface GraceEntry {
+  timeout: ReturnType<typeof setTimeout>;
+  /** Epoch-ms when the timer fires; surfaced to clients for countdown. */
+  expiresAt: number;
+}
+
+const disconnectGrace = new Map<string, GraceEntry>();
+
+function graceKey(roomId: string, userId: string): string {
+  return `${roomId}::${userId}`;
+}
+
+function getGraceExpiry(roomId: string, userId: string): number | undefined {
+  return disconnectGrace.get(graceKey(roomId, userId))?.expiresAt;
+}
+
+/** Cancel any in-flight grace timer for this user in this room. */
+export function cancelDisconnectGrace(roomId: string, userId: string): void {
+  const key = graceKey(roomId, userId);
+  const entry = disconnectGrace.get(key);
+  if (!entry) return;
+  clearTimeout(entry.timeout);
+  disconnectGrace.delete(key);
+}
+
+/**
+ * Schedule a grace-period timer for this user/room. If the user
+ * doesn't reconnect within GRACE_PERIOD_MS, `onExpire` runs. Replaces
+ * any existing timer for the same key (idempotent — useful if a
+ * second disconnect fires before the first one expired).
+ */
+function scheduleDisconnectGrace(
+  roomId: string,
+  userId: string,
+  onExpire: () => Promise<void> | void,
+): GraceEntry {
+  cancelDisconnectGrace(roomId, userId);
+  const expiresAt = Date.now() + GRACE_PERIOD_MS;
+  const timeout = setTimeout(() => {
+    disconnectGrace.delete(graceKey(roomId, userId));
+    Promise.resolve(onExpire()).catch((err) => {
+      console.error(`[room] disconnect-grace expire failed for ${userId} in ${roomId}:`, err);
+    });
+  }, GRACE_PERIOD_MS);
+  // Don't keep the Node process alive just for this timer.
+  if (typeof timeout === 'object' && timeout !== null && 'unref' in timeout) {
+    (timeout as { unref: () => void }).unref();
+  }
+  const entry: GraceEntry = { timeout, expiresAt };
+  disconnectGrace.set(graceKey(roomId, userId), entry);
+  return entry;
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function toGameRoom(room: RoomState): GameRoom {
-  const players: RoomPlayer[] = room.players.map((p) => ({
-    userId: p.userId,
-    displayName: p.displayName,
-    isReady: p.isReady,
-    // Bots are always considered connected — they have no socket but cannot drop.
-    isConnected: p.isBot || p.socketId !== null,
-    isBot: p.isBot,
-    botDifficulty: p.botDifficulty,
-    ...(p.isWaiting ? { isWaiting: true } : {}),
-  }));
+  const players: RoomPlayer[] = room.players.map((p) => {
+    // Surface a live grace expiry only for HUMAN seats with a pending
+    // timer. Bots and live (socketId !== null) humans never carry it.
+    const grace = !p.isBot && p.socketId === null
+      ? getGraceExpiry(room.roomId, p.userId)
+      : undefined;
+    return {
+      userId: p.userId,
+      displayName: p.displayName,
+      isReady: p.isReady,
+      // Bots are always considered connected — they have no socket but cannot drop.
+      isConnected: p.isBot || p.socketId !== null,
+      isBot: p.isBot,
+      botDifficulty: p.botDifficulty,
+      ...(p.isWaiting ? { isWaiting: true } : {}),
+      ...(grace !== undefined ? { disconnectGraceUntil: grace } : {}),
+    };
+  });
 
   return {
     id: room.roomId,
@@ -172,7 +249,7 @@ async function fetchUserMeta(
 
 export async function restorePlayerToRoom(
   socket: CalashSocket,
-  _io: CalashServer,
+  io: CalashServer,
 ): Promise<void> {
   const { playerId } = socket.data;
 
@@ -261,13 +338,23 @@ export async function restorePlayerToRoom(
     return;
   }
 
+  // The user is back inside the grace window — cancel the pending
+  // disconnect timer (if any) so it doesn't fire and treat them as
+  // having left a few seconds after they're already back.
+  cancelDisconnectGrace(room.roomId, playerId);
+
   // Restore socket to the room channel.
   roomStore.updateSocket(room.roomId, playerId, socket.id);
   socket.data.roomId = room.roomId;
   await socket.join(room.roomId);
 
-  // Send the current room state.
+  // Send the current room state. The disconnectGraceUntil field on
+  // the player slot will be absent now (we just cancelled), so other
+  // players' next refresh shows them as connected again.
   socket.emit('room:updated', toGameRoom(room));
+  // Also broadcast to the rest of the room so their UI clears the
+  // "disconnected" badge for this seat.
+  broadcastRoomUpdate(io, room);
 
   // If a game is in progress, send the round state and private hand.
   if (room.round) {
@@ -506,11 +593,17 @@ async function joinRoom(
       cancelBotTimer(room.roomId);
     } else {
       roomStore.updateSocket(room.roomId, playerId, socket.id);
+      // Ordinary reconnect: cancel any pending grace timer so it
+      // doesn't fire and treat the now-back user as having left.
+      cancelDisconnectGrace(room.roomId, playerId);
     }
     socket.data.roomId = room.roomId;
     await socket.join(room.roomId);
     socket.emit('room:updated', toGameRoom(room));
-    if (wasBotSubstitute) broadcastRoomUpdate(io, room);
+    // Always broadcast on reclaim AND on ordinary reconnect — the
+    // disconnectGraceUntil field that other clients used to render
+    // the "disconnected — Ns" badge needs to clear immediately.
+    broadcastRoomUpdate(io, room);
 
     if (room.round) {
       const { toRoundStateView } = await import('@calash/game-core');
@@ -935,40 +1028,30 @@ function hasAnyHuman(room: RoomState): boolean {
   return room.players.some((p) => !p.isBot);
 }
 
-// ─── room:leave ──────────────────────────────────────────────────────────────
-
-export async function handleRoomLeave(
-  socket: CalashSocket,
+/**
+ * The actual "treat this user as having left" logic, parameterised
+ * on whether the caller has a live socket (explicit Leave button)
+ * or not (grace-period timer fired). Both call sites need:
+ *
+ *   - mid-game: bot-substitute the seat, persist is_human_substitute,
+ *     drop the user-index entry, broadcast the update, and close the
+ *     room if no humans remain.
+ *   - lobby/finished: full row removal, close the room if no humans
+ *     remain, otherwise transfer host to the next human and broadcast.
+ *
+ * The socket-only steps (socket.data.roomId clear, socket.leave) only
+ * fire when a socket was provided. Cancelling any in-flight grace
+ * timer for this user is the caller's responsibility (avoids the
+ * timer trying to leave them a second time).
+ */
+async function performLeave(
+  room: RoomState,
+  playerId: string,
   io: CalashServer,
+  opts: { socket?: CalashSocket; reason: 'explicit' | 'grace-timeout' },
 ): Promise<void> {
-  const { playerId, roomId } = socket.data;
-  if (!roomId) return;
+  const roomId = room.roomId;
 
-  const room = roomStore.get(roomId);
-  if (!room) return;
-
-  // ── Mid-game leave: substitute the seat with a bot ──────────────────────
-  // The seat keeps its user id (the original human's) and stays in the
-  // round. Hand, melds, score, turn-state all survive intact — the bot
-  // driver picks up the same seat next time it's that user id's turn.
-  // The user's `game_room_players` row stays open with left_at = NULL so
-  // they can rejoin and reclaim. socket.data.roomId is cleared and the
-  // socket leaves the channel; the human's UI navigates back to the lobby.
-  //
-  // Three additional things matter here, all of which were missing in
-  // an earlier version and produced the "auto-rejoins on refresh and
-  // can't substitute again" bug:
-  //
-  //   1. Set slot.isHumanSubstitute = true so future fresh joiners
-  //      can't steal this seat (replaceableBots filters it out) and
-  //      the lobby's rejoin listing can find it.
-  //   2. Persist that flag to game_room_players.is_human_substitute
-  //      so a server restart doesn't lose it.
-  //   3. Untrack the user from the in-memory user-index so
-  //      restorePlayerToRoom does NOT auto-rejoin them on next socket
-  //      handshake. The DB row is what they rejoin AGAINST when they
-  //      explicitly click rejoin from the lobby; the in-memory index
-  //      is for active connections only.
   if (room.status === 'in-progress') {
     const slot = room.players.find((p) => p.userId === playerId);
     if (slot && !slot.isBot) {
@@ -978,24 +1061,15 @@ export async function handleRoomLeave(
         'UPDATE game_room_players SET is_human_substitute = true WHERE room_id = $1 AND user_id = $2',
         [roomId, playerId],
       );
-      // Drop the user-index mapping so this socket (and any future
-      // socket from the same user) no longer auto-rejoins via
-      // restorePlayerToRoom. Explicit rejoin via room:join still
-      // finds the slot and reclaims it (joinRoom reads room.players
-      // directly, not the user index).
       roomStore.untrackUser(playerId);
 
-      socket.data.roomId = undefined;
-      await socket.leave(roomId);
+      if (opts.socket) {
+        opts.socket.data.roomId = undefined;
+        await opts.socket.leave(roomId);
+      }
 
-      // If this was the LAST human, the room is now all-bots. Per the
-      // "no humans, no room" rule the room must close immediately —
-      // skip the broadcast and bot-driver scheduling and go straight
-      // to teardown. Substituted-bot rows for previously-departed
-      // humans are torn down with the room; their reclaim path goes
-      // away (they have to create a new room).
       if (!hasAnyHuman(room)) {
-        await closeAbandonedRoom(room, io, 'last-human-left-mid-game');
+        await closeAbandonedRoom(room, io, `last-human-left-mid-game-${opts.reason}`);
         logRoom('leave-substitute', {
           action: 'leave',
           roomId,
@@ -1007,14 +1081,13 @@ export async function handleRoomLeave(
           flipped,
           substitutedTurn: false,
           closedRoom: true,
+          reason: opts.reason,
         });
         return;
       }
 
       broadcastRoomUpdate(io, room);
 
-      // If it's currently this seat's turn, kick the bot driver so the
-      // game continues without waiting for the human's next action.
       if (room.round && room.round.state.currentTurnPlayerId === playerId) {
         const { scheduleBotIfNeeded } = await import('./game.js');
         scheduleBotIfNeeded(roomId, io);
@@ -1030,31 +1103,28 @@ export async function handleRoomLeave(
         activePlayerCount: room.players.length,
         flipped,
         substitutedTurn: room.round?.state.currentTurnPlayerId === playerId,
+        reason: opts.reason,
       });
       return;
     }
-    // Slot not found OR already a bot somehow — fall through to the
-    // standard leave path. (Bots leaving mid-game shouldn't happen since
-    // bots only "leave" via removeBot in the lobby.)
+    // Slot missing OR already a bot — fall through to standard leave.
   }
 
-  // ── Lobby / finished-state leave: full removal ──────────────────────────
+  // Lobby / finished: full row removal.
   await db.rooms.removePlayer(roomId, playerId);
-
   room.players = room.players.filter((p) => p.userId !== playerId);
   roomStore.untrackUser(playerId);
-  socket.data.roomId = undefined;
-  await socket.leave(roomId);
 
-  // No humans left? Tear down the whole room (bots-only is not a
-  // valid persistent state; closeAbandonedRoom also removes any
-  // remaining bot rows + cancels the bot timer).
+  if (opts.socket) {
+    opts.socket.data.roomId = undefined;
+    await opts.socket.leave(roomId);
+  }
+
   if (!hasAnyHuman(room)) {
-    await closeAbandonedRoom(room, io, 'no-humans-remaining');
+    await closeAbandonedRoom(room, io, `no-humans-remaining-${opts.reason}`);
     return;
   }
 
-  // Transfer host to the first remaining HUMAN if the host left.
   const remainingHumans = room.players.filter((p) => !p.isBot);
   if (room.hostUserId === playerId) {
     room.hostUserId = remainingHumans[0].userId;
@@ -1068,7 +1138,27 @@ export async function handleRoomLeave(
     userId: playerId,
     status: room.status,
     activePlayerCount: room.players.length,
+    reason: opts.reason,
   });
+}
+
+// ─── room:leave ──────────────────────────────────────────────────────────────
+
+export async function handleRoomLeave(
+  socket: CalashSocket,
+  io: CalashServer,
+): Promise<void> {
+  const { playerId, roomId } = socket.data;
+  if (!roomId) return;
+
+  const room = roomStore.get(roomId);
+  if (!room) return;
+
+  // Explicit Leave bypasses the grace timer — if one is pending it's
+  // moot (we're leaving right now). Cancel before performLeave so the
+  // timer doesn't fire mid-leave and double-process the user.
+  cancelDisconnectGrace(roomId, playerId);
+  await performLeave(room, playerId, io, { socket, reason: 'explicit' });
 }
 
 // ─── room:ready ──────────────────────────────────────────────────────────────
@@ -1125,27 +1215,43 @@ export function handleDisconnect(
   const room = roomStore.get(roomId);
   if (!room) return;
 
-  // In lobby: broadcast updated connection status.
-  if (room.status === 'lobby') {
-    broadcastRoomUpdate(io, room);
+  // Bot seats can never disconnect (no socket), so any disconnect
+  // here is from a human seat. Schedule the grace timer that decides
+  // whether this becomes a real leave.
+  const slot = room.players.find((p) => p.userId === playerId);
+  if (!slot || slot.isBot) {
+    // Slot's already gone (race) or already a bot — nothing to do.
+    return;
   }
-  // In-game: keep the seat state intact. The socket has dropped (could
-  // be a blip, page refresh, second tab, or full-on disconnect) — the
-  // bot driver only acts on slots where isBot === true, so an
-  // unsubstituted seat just waits for reconnect. Deliberate "Leave"
-  // through the UI takes the substitution path in handleRoomLeave; raw
-  // socket drops do NOT auto-substitute, on the grounds that a brief
-  // blip shouldn't surrender the player's hand to a bot. If a future
-  // requirement wants timeout-based substitution after N seconds of
-  // silence, do it here with a setTimeout that calls
-  // substituteSeatWithBot when the timer fires AND the slot is still
-  // socketId === null AND still isBot === false.
+
+  // Schedule the grace expiry. If the user reconnects (joinRoom
+  // reclaim path or restorePlayerToRoom) the timer is cancelled
+  // there. If they don't, the same path explicit Leave takes runs
+  // — substitute mid-game / remove from lobby, close-if-empty.
+  scheduleDisconnectGrace(roomId, playerId, async () => {
+    const live = roomStore.get(roomId);
+    if (!live) return;
+    const liveSlot = live.players.find((p) => p.userId === playerId);
+    // The user might have come back, been substituted by another path,
+    // or have left explicitly during the grace window. Only fire when
+    // the slot is still a disconnected human.
+    if (!liveSlot) return;
+    if (liveSlot.isBot) return;
+    if (liveSlot.socketId !== null) return; // reconnected
+    await performLeave(live, playerId, io, { reason: 'grace-timeout' });
+  });
+
+  // Broadcast so the other players see the "disconnected — Ns" badge
+  // immediately rather than waiting for the next normal update.
+  broadcastRoomUpdate(io, room);
+
   logRoom('disconnect', {
     action: 'leave',
     roomId,
     roomCode: room.inviteCode,
     userId: playerId,
     status: room.status,
+    graceMs: GRACE_PERIOD_MS,
   });
 }
 

@@ -152,6 +152,8 @@ export const en: Record<string, string> = {
   'waiting.markReady': '✓ Ready up',
   'waiting.unready': 'Unready',
   'waiting.disconnected': 'disconnected',
+  'waiting.disconnectedCountdown': 'disconnected — {{n}}s',
+  'waiting.disconnectedHint': 'Reconnects within 30 seconds will restore the seat. After that, the seat is replaced by a bot.',
   'waiting.startGame': 'Start game',
   'waiting.addBot': '🤖 Add Easy Bot',
   'waiting.removeBot': 'Remove bot',

@@ -159,6 +159,16 @@ export interface RoomPlayer {
    */
   isHumanSubstitute?: boolean;
   /**
+   * Epoch-ms (Date.now() compatible) at which this seat's reconnect
+   * grace period expires. Set when the human's socket drops without
+   * an explicit Leave; the server gives them this long to come back
+   * before substituting/removing the seat. Cleared on reconnect or
+   * when the timer fires. Undefined for bots and live human seats.
+   *
+   * The client uses this to render a "disconnected — Ns left" badge.
+   */
+  disconnectGraceUntil?: number;
+  /**
    * True when the player joined a fresh empty seat WHILE a round was
    * already in progress. They hold the seat but don't deal/play this
    * round — they enter on the next round transition. Cleared by

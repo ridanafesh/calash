@@ -6,6 +6,7 @@ import { useAuth } from '@/lib/auth-context';
 import { useGame } from '@/lib/game-context';
 import { useT } from '@/lib/i18n';
 import { LanguageSwitcher } from '@/components/LanguageSwitcher';
+import { DisconnectCountdown } from '@/components/game/DisconnectCountdown';
 import { GAME_CONFIG } from '@calash/shared';
 
 export function WaitingRoom() {
@@ -133,7 +134,11 @@ export function WaitingRoom() {
                 </div>
                 <div className="row" style={{ gap: 6 }}>
                   {!p.isBot && !p.isConnected && (
-                    <span className="badge badge-warning">{t('waiting.disconnected')}</span>
+                    p.disconnectGraceUntil ? (
+                      <DisconnectCountdown graceUntil={p.disconnectGraceUntil} />
+                    ) : (
+                      <span className="badge badge-warning">{t('waiting.disconnected')}</span>
+                    )
                   )}
                   {p.isReady ? (
                     <span className="badge badge-success">{t('waiting.ready')}</span>

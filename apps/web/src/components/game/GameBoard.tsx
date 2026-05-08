@@ -16,6 +16,7 @@ import { JokerAssignmentPicker } from './JokerAssignmentPicker';
 import { EmojiReactionButton } from './EmojiReactionButton';
 import { applySortMode, type HandSortMode } from './hand-sort';
 import { detectMeldFitness, findExtendableMelds, sortForMeldPreview } from './meld-detect';
+import { DisconnectCountdown } from './DisconnectCountdown';
 
 const SUIT_GLYPH: Record<Suit, string> = { hearts: '♥', diamonds: '♦', clubs: '♣', spades: '♠' };
 const SUIT_TEXT_COLOR: Record<Suit, string> = {
@@ -532,6 +533,9 @@ export function GameBoard() {
           const op = gameState.playerStates[opId];
           const isOpTurn = gameState.currentTurnPlayerId === opId;
           const opScore = scores.find((s) => s.playerId === opId);
+          // Look up the room slot for this opponent to surface their
+          // disconnect grace countdown (if any).
+          const opSlot = room?.players.find((p) => p.userId === opId);
           return (
             <div
               key={opId}
@@ -560,6 +564,15 @@ export function GameBoard() {
                 {isBot(opId) && <span className="badge badge-accent" style={{ fontSize: '0.62rem' }}>{t('waiting.bot')}</span>}
                 {isOpTurn && <span className="badge badge-warning" style={{ fontSize: '0.68rem' }}>▶</span>}
                 {op?.hasGoneDown && <span className="badge badge-accent" style={{ fontSize: '0.68rem' }}>{t('game.down')}</span>}
+                {opSlot && !opSlot.isBot && !opSlot.isConnected && (
+                  opSlot.disconnectGraceUntil ? (
+                    <DisconnectCountdown graceUntil={opSlot.disconnectGraceUntil} />
+                  ) : (
+                    <span className="badge badge-warning" style={{ fontSize: '0.68rem' }}>
+                      {t('waiting.disconnected')}
+                    </span>
+                  )
+                )}
               </div>
               {opScore && (
                 <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>

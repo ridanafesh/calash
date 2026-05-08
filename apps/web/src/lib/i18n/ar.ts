@@ -150,6 +150,8 @@ export const ar: Record<string, string> = {
   'waiting.markReady': '✓ أنا جاهز',
   'waiting.unready': 'لست جاهزًا',
   'waiting.disconnected': 'غير متصل',
+  'waiting.disconnectedCountdown': 'غير متصل — {{n}}ث',
+  'waiting.disconnectedHint': 'العودة خلال 30 ثانية تستعيد المقعد. بعد ذلك يتم استبداله ببوت.',
   'waiting.startGame': 'ابدأ اللعبة',
   'waiting.addBot': '🤖 أضف كمبيوتر سهل',
   'waiting.removeBot': 'إزالة الكمبيوتر',
