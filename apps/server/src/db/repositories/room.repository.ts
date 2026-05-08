@@ -273,6 +273,107 @@ export class RoomRepository {
     );
   }
 
+  /**
+   * Find every "stale" room — status lobby/in_progress but with no
+   * live human players (a row counts as a live human when the user
+   * is not a bot AND left_at IS NULL). Returns the room rows so the
+   * caller can also clean their in-memory mirror, cancel bot timers,
+   * etc.
+   *
+   * "No live human" includes:
+   *   - rooms with no player rows at all (orphans);
+   *   - rooms where every active row is a bot (host-bots OR
+   *     human-substitute bots);
+   *   - rooms where every player row has been marked left_at.
+   *
+   * Use cleanupStaleRooms() to also UPDATE them to status='abandoned'
+   * and close out their player rows in a single transaction.
+   */
+  async findStaleRooms(): Promise<GameRoomRow[]> {
+    const { rows } = await this.db.query<GameRoomRow>(
+      `SELECT r.*
+       FROM game_rooms r
+       WHERE r.status IN ('lobby', 'in_progress')
+         AND NOT EXISTS (
+           SELECT 1
+           FROM game_room_players grp
+           JOIN users u ON u.id = grp.user_id
+           WHERE grp.room_id = r.id
+             AND grp.left_at IS NULL
+             AND u.is_bot = false
+         )`,
+    );
+    return rows;
+  }
+
+  /**
+   * Mark every stale room as abandoned and close out its remaining
+   * player rows. Returns the affected room ids so the caller can
+   * also drop them from the in-memory roomStore + cancel any bot
+   * timers. Idempotent: safe to call on startup AND periodically.
+   *
+   * Done in a single transaction so a crash mid-cleanup doesn't
+   * leave the rooms half-closed.
+   */
+  async cleanupStaleRooms(): Promise<string[]> {
+    const client = await this.db.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Use the same predicate as findStaleRooms to be safe under
+      // concurrent leave/disconnect — re-evaluating inside the txn.
+      const { rows: stale } = await client.query<{ id: string }>(
+        `SELECT r.id
+         FROM game_rooms r
+         WHERE r.status IN ('lobby', 'in_progress')
+           AND NOT EXISTS (
+             SELECT 1
+             FROM game_room_players grp
+             JOIN users u ON u.id = grp.user_id
+             WHERE grp.room_id = r.id
+               AND grp.left_at IS NULL
+               AND u.is_bot = false
+           )
+         FOR UPDATE OF r`,
+      );
+
+      if (stale.length === 0) {
+        await client.query('COMMIT');
+        return [];
+      }
+
+      const ids = stale.map((r) => r.id);
+
+      // Close any open player rows so a future findActiveRoomForUser
+      // doesn't try to auto-restore someone into an abandoned room.
+      await client.query(
+        `UPDATE game_room_players
+            SET left_at = NOW()
+          WHERE room_id = ANY($1::uuid[])
+            AND left_at IS NULL`,
+        [ids],
+      );
+
+      // Mark the rooms abandoned + bump updated_at so any future
+      // listing query that looks at created_at ordering still works.
+      await client.query(
+        `UPDATE game_rooms
+            SET status = 'abandoned',
+                updated_at = NOW()
+          WHERE id = ANY($1::uuid[])`,
+        [ids],
+      );
+
+      await client.query('COMMIT');
+      return ids;
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
   async updateStatus(
     roomId: string,
     status: GameRoomRow['status'],

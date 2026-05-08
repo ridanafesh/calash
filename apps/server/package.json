@@ -13,6 +13,8 @@
     "// db:migrate:dev": "Local-only convenience that runs the migrator straight from .ts via tsx, so you don't have to build first.",
     "db:migrate:dev": "tsx src/db/migrate.ts",
     "db:seed": "tsx src/db/seed.ts",
+    "// db:cleanup-rooms": "Ad-hoc one-shot stale-room sweep. The same logic runs at server startup and every 5 min; this script is for manual cleanup of zombie rooms after a bad deploy or incident.",
+    "db:cleanup-rooms": "tsx scripts/cleanup-stale-rooms.ts",
     "// start:prod": "Production startup: apply pending migrations first (idempotent — already-applied ones are skipped via schema_migrations) then start the server. This is what Render's Start Command should invoke.",
     "start:prod": "npm run db:migrate && node dist/index.js",
     "test": "jest",
