@@ -112,25 +112,72 @@ export class RoomRepository {
     }
   }
 
-  async addPlayer(roomId: string, userId: string): Promise<GameRoomPlayerRow> {
-    // Assign the next available seat index
-    const { rows } = await this.db.query<GameRoomPlayerRow>(
-      `INSERT INTO game_room_players (room_id, user_id, seat_index)
-       SELECT $1, $2,
-         COALESCE(
-           (SELECT MAX(seat_index) + 1 FROM game_room_players WHERE room_id = $1),
-           0
-         )
-       WHERE NOT EXISTS (
-         SELECT 1 FROM game_room_players WHERE room_id = $1 AND user_id = $2
+  /**
+   * Add a player to a room, OR reactivate an existing player record
+   * (a player who previously left this room and is now rejoining).
+   *
+   * Returns:
+   *   { row, kind: 'new'         } — fresh insert; assigned a new seat.
+   *   { row, kind: 'reactivated' } — prior left_at row reset to NULL.
+   *   { row, kind: 'existing'    } — already an active player; idempotent
+   *                                  reconnect, no DB mutation needed.
+   *
+   * Never throws on "already in room" — that case is normal during a
+   * refresh / reconnect / second tab and is handled by the caller as
+   * a reconnect, not a 500. Only throws on real DB errors.
+   */
+  async addPlayer(
+    roomId: string,
+    userId: string,
+  ): Promise<{ row: GameRoomPlayerRow; kind: 'new' | 'reactivated' | 'existing' }> {
+    // 1. Existing active row → reconnect.
+    const { rows: existing } = await this.db.query<GameRoomPlayerRow>(
+      `SELECT * FROM game_room_players
+       WHERE room_id = $1 AND user_id = $2 AND left_at IS NULL`,
+      [roomId, userId],
+    );
+    if (existing[0]) {
+      return { row: existing[0], kind: 'existing' };
+    }
+
+    // 2. Prior row with left_at set → reactivate that same seat.
+    //    Reusing the seat keeps the player's history intact and avoids
+    //    seat-index gaps. We pick the most-recently-left row in case
+    //    the player joined-left-joined-left more than once.
+    const { rows: prior } = await this.db.query<GameRoomPlayerRow>(
+      `UPDATE game_room_players
+       SET left_at = NULL
+       WHERE id = (
+         SELECT id FROM game_room_players
+         WHERE room_id = $1 AND user_id = $2 AND left_at IS NOT NULL
+         ORDER BY left_at DESC
+         LIMIT 1
        )
        RETURNING *`,
       [roomId, userId],
     );
-    if (!rows[0]) {
-      throw new Error(`User ${userId} is already in room ${roomId}`);
+    if (prior[0]) {
+      return { row: prior[0], kind: 'reactivated' };
     }
-    return rows[0];
+
+    // 3. Truly new player → insert with the next seat index. Compute the
+    //    next seat off ALL rows for this room (including left_at-set
+    //    ones) so a returning player who somehow got missed by step 2
+    //    doesn't collide on the unique (room_id, seat_index) constraint.
+    const { rows: inserted } = await this.db.query<GameRoomPlayerRow>(
+      `INSERT INTO game_room_players (room_id, user_id, seat_index)
+       VALUES (
+         $1,
+         $2,
+         COALESCE(
+           (SELECT MAX(seat_index) + 1 FROM game_room_players WHERE room_id = $1),
+           0
+         )
+       )
+       RETURNING *`,
+      [roomId, userId],
+    );
+    return { row: inserted[0], kind: 'new' };
   }
 
   async removePlayer(roomId: string, userId: string): Promise<void> {

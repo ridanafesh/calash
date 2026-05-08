@@ -54,6 +54,33 @@ function emitError(socket: CalashSocket, code: string, message: string): void {
 }
 
 /**
+ * Structured log line for room lifecycle events. Single-line JSON so log
+ * collectors (Render's log viewer included) can pick fields out without
+ * regexing pino's pretty output. The leading `[room]` prefix preserves
+ * the previous `console.log` format for any tooling that grepped on it.
+ */
+function logRoom(
+  event: string,
+  fields: {
+    action?: 'join' | 'rejoin' | 'leave' | 'reconnect' | 'close' | 'create' | 'kick';
+    roomId?: string;
+    roomCode?: string;
+    userId?: string;
+    seatIndex?: number;
+    status?: RoomState['status'];
+    activePlayerCount?: number;
+    [k: string]: unknown;
+  },
+): void {
+  const parts: string[] = [`[room] event=${event}`];
+  for (const [k, v] of Object.entries(fields)) {
+    if (v === undefined || v === null) continue;
+    parts.push(`${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`);
+  }
+  console.log(parts.join(' '));
+}
+
+/**
  * Fetch display name + is_bot for a batch of user ids in a single round-trip.
  * Used by reconnect / DB-rebuild paths so we restore PlayerSlot.isBot correctly.
  */
@@ -352,11 +379,25 @@ async function joinRoom(
       const ps = room.round.state.playerStates[playerId];
       if (ps) socket.emit('game:hand', ps.hand);
     }
-    console.log(`[room] ${playerId} rejoined room ${room.roomId}`);
+    logRoom('reconnect', {
+      action: 'reconnect',
+      roomId: room.roomId,
+      roomCode: room.inviteCode,
+      userId: playerId,
+      status: room.status,
+      activePlayerCount: room.players.length,
+    });
     return;
   }
 
   if (room.status !== 'lobby') {
+    logRoom('join-rejected', {
+      roomId: room.roomId,
+      roomCode: room.inviteCode,
+      userId: playerId,
+      status: room.status,
+      reason: 'GAME_IN_PROGRESS',
+    });
     socket.emit('room:error', { code: 'GAME_IN_PROGRESS', message: 'This room has already started.' });
     return;
   }
@@ -367,10 +408,20 @@ async function joinRoom(
     return;
   }
 
-  const seatIndex = room.players.length;
-  await db.rooms.addPlayer(room.roomId, playerId);
+  // Persist (or reactivate) the player record. The repository handles
+  // the rejoin case — if the user previously left this room their
+  // existing row is reactivated and we keep their old seat index.
+  const { row: dbRow, kind } = await db.rooms.addPlayer(room.roomId, playerId);
+  const seatIndex = dbRow.seat_index;
 
-  const slot = { userId: playerId, seatIndex, isReady: false, socketId: socket.id, displayName: displayName ?? playerId, isBot: false };
+  const slot = {
+    userId: playerId,
+    seatIndex,
+    isReady: false,
+    socketId: socket.id,
+    displayName: displayName ?? playerId,
+    isBot: false,
+  };
   room.players.push(slot);
   roomStore.trackUser(playerId, room.roomId);
 
@@ -378,7 +429,15 @@ async function joinRoom(
   await socket.join(room.roomId);
 
   broadcastRoomUpdate(io, room);
-  console.log(`[room] ${playerId} joined room ${room.roomId}`);
+  logRoom('join', {
+    action: kind === 'reactivated' ? 'rejoin' : 'join',
+    roomId: room.roomId,
+    roomCode: room.inviteCode,
+    userId: playerId,
+    seatIndex,
+    status: room.status,
+    activePlayerCount: room.players.length,
+  });
 }
 
 export async function handleRoomJoin(
@@ -499,7 +558,14 @@ export async function handleRoomLeave(
     roomStore.delete(roomId);
     const { cancelBotTimer } = await import('./game.js');
     cancelBotTimer(roomId);
-    console.log(`[room] Room ${roomId} abandoned (no humans remaining).`);
+    logRoom('close', {
+      action: 'close',
+      roomId,
+      roomCode: room.inviteCode,
+      userId: playerId,
+      reason: 'no-humans-remaining',
+      activePlayerCount: 0,
+    });
     return;
   }
 
@@ -509,7 +575,14 @@ export async function handleRoomLeave(
   }
 
   broadcastRoomUpdate(io, room);
-  console.log(`[room] ${playerId} left room ${roomId}`);
+  logRoom('leave', {
+    action: 'leave',
+    roomId,
+    roomCode: room.inviteCode,
+    userId: playerId,
+    status: room.status,
+    activePlayerCount: room.players.length,
+  });
 }
 
 // ─── room:ready ──────────────────────────────────────────────────────────────
