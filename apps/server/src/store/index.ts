@@ -10,6 +10,20 @@ export interface PlayerSlot {
   isBot: boolean;
   /** Difficulty for bots; undefined for human players. */
   botDifficulty?: BotDifficulty;
+  /**
+   * True when the slot is a substitute for a human who left mid-game
+   * (handled by substituteSeatWithBot). These bots are NOT eligible
+   * targets for fresh joiners — only the original human can reclaim.
+   * Defaults to false for host-created bots and freshly-joined humans.
+   */
+  isHumanSubstitute?: boolean;
+  /**
+   * True when the player joined a fresh empty seat while a round was
+   * already in progress. They hold the seat but aren't part of the
+   * current RoundState — they enter on the next round transition.
+   * Cleared by startGame.
+   */
+  isWaiting?: boolean;
 }
 
 export interface ActiveRound {
@@ -25,6 +39,8 @@ export interface ActiveRound {
 export interface RoomState {
   roomId: string;
   inviteCode: string;
+  /** When true the room is "locked": joiners must supply the invite code. */
+  isPrivate: boolean;
   hostUserId: string;
   status: 'lobby' | 'in-progress' | 'finished';
   maxPlayers: number;

@@ -67,6 +67,7 @@ router.post('/rooms', requireAuth, async (req, res) => {
   const room: RoomState = {
     roomId: dbRoom.id,
     inviteCode,
+    isPrivate: false,
     hostUserId: userId,
     status: 'lobby',
     maxPlayers,

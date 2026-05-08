@@ -15,6 +15,7 @@ import type {
   GameRoom,
   JokerAssignment,
   RoomCreateOptions,
+  RoomJoinChoice,
   RoundStateView,
   RoundResult,
   GameScore,
@@ -23,6 +24,22 @@ import type {
   ClientToServerEvents,
   ServerToClientEvents,
 } from '@calash/shared';
+
+/**
+ * Surface for the seat-choice flow: when both bot replacement and an
+ * empty seat are available the server emits 'room:join-options' and
+ * the client renders a picker. Once the user picks, the picker calls
+ * the resolver below to resubmit the join with the chosen path.
+ */
+export interface JoinOptionsPrompt {
+  roomId: string;
+  replaceableBots: Array<{ userId: string; displayName: string; seatIndex: number }>;
+  hasEmptySeat: boolean;
+  roundInProgress: boolean;
+  /** True if this prompt was triggered by a join-by-code (so the
+   *  resolver re-emits 'room:join-by-code' with the choice). */
+  fromCode?: string;
+}
 import { useAuth } from './auth-context';
 import { socketUrl } from './server-urls';
 
@@ -81,8 +98,24 @@ interface GameContextValue {
   roundResult: RoundResult | null;
   winner: { playerId: string; finalScore: number } | null;
   createRoom: (options: RoomCreateOptions) => void;
-  joinRoom: (roomId: string) => void;
-  joinByCode: (code: string) => void;
+  /**
+   * Join by room id. `code` is required only for locked rooms; pass it
+   * after the user enters the code in the locked-room popup. `choice`
+   * disambiguates the bot-vs-empty-seat case after the server emits
+   * 'room:join-options'.
+   */
+  joinRoom: (roomId: string, code?: string, choice?: RoomJoinChoice) => void;
+  joinByCode: (code: string, choice?: RoomJoinChoice) => void;
+  /**
+   * Active seat-choice prompt. Non-null when the server has asked the
+   * client to pick between bot replacement and empty seat. Cleared by
+   * resolveJoinOptions or dismissJoinOptions.
+   */
+  joinOptions: JoinOptionsPrompt | null;
+  /** Resubmit the pending join with the user's seat choice. */
+  resolveJoinOptions: (choice: RoomJoinChoice) => void;
+  /** Cancel the seat-choice prompt without joining. */
+  dismissJoinOptions: () => void;
   leaveRoom: () => void;
   toggleReady: () => void;
   addBot: (difficulty?: BotDifficulty) => void;
@@ -129,6 +162,14 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const reactionTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   // Local cooldown gate — purely UX; the server still enforces.
   const lastReactionAt = useRef<number>(0);
+  // Active seat-choice prompt — non-null while the server is waiting for
+  // the user to pick "replace bot" vs "take empty seat". The pending
+  // attempt's invite-code (if any) is stashed alongside so the
+  // resolver knows whether to resubmit room:join or room:join-by-code.
+  const [joinOptions, setJoinOptions] = useState<JoinOptionsPrompt | null>(null);
+  // Carries the most-recent join attempt's invite code so resolveJoinOptions
+  // can replay the call with the same code (locked-room flow).
+  const lastJoinCode = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     if (!token) {
@@ -164,8 +205,26 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
             : `Cannot reach game server (${err.message}).`,
       });
     });
-    s.on('room:updated', setRoom);
+    s.on('room:updated', (room) => {
+      setRoom(room);
+      // A successful room:updated means the join landed (or some other
+      // mid-room event arrived). Either way the join-options prompt is
+      // no longer relevant, so dismiss any open picker.
+      setJoinOptions(null);
+    });
     s.on('room:error', setRoomError);
+    // Server tells us "you can join via bot replacement OR empty seat —
+    // pick one". Stash the prompt so the lobby UI can render the picker;
+    // the user's selection re-emits room:join with the chosen path.
+    s.on('room:join-options', (opts) => {
+      setJoinOptions({
+        roomId: opts.roomId,
+        replaceableBots: opts.replaceableBots,
+        hasEmptySeat: opts.hasEmptySeat,
+        roundInProgress: opts.roundInProgress,
+        fromCode: lastJoinCode.current,
+      });
+    });
     s.on('game:state', setGameState);
     s.on('game:hand', setHand);
     // PRIVATE — only the drawing player receives this event with the actual
@@ -217,12 +276,39 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     socketRef.current?.emit('room:create', options);
   }, []);
 
-  const joinRoom = useCallback((roomId: string) => {
-    socketRef.current?.emit('room:join', roomId);
+  const joinRoom = useCallback((roomId: string, code?: string, choice?: RoomJoinChoice) => {
+    // Stash the code so resolveJoinOptions can replay the call with the
+    // same code on locked rooms. Cleared on dismiss / room:updated.
+    lastJoinCode.current = code;
+    socketRef.current?.emit('room:join', roomId, code, choice);
   }, []);
 
-  const joinByCode = useCallback((code: string) => {
-    socketRef.current?.emit('room:join-by-code', code);
+  const joinByCode = useCallback((code: string, choice?: RoomJoinChoice) => {
+    lastJoinCode.current = code;
+    socketRef.current?.emit('room:join-by-code', code, choice);
+  }, []);
+
+  /**
+   * Resubmit the most-recent join attempt with the user's chosen seat
+   * path. Called from the seat-choice popup. We re-emit the same event
+   * shape (room:join-by-code if the original came from the lobby's
+   * locked-room prompt; otherwise room:join with the room id).
+   */
+  const resolveJoinOptions = useCallback((choice: RoomJoinChoice) => {
+    const opts = joinOptions;
+    if (!opts) return;
+    if (opts.fromCode) {
+      socketRef.current?.emit('room:join-by-code', opts.fromCode, choice);
+    } else {
+      socketRef.current?.emit('room:join', opts.roomId, lastJoinCode.current, choice);
+    }
+    // Don't clear joinOptions yet — wait for room:updated so a server
+    // rejection (e.g. the bot was already replaced) can still surface.
+  }, [joinOptions]);
+
+  const dismissJoinOptions = useCallback(() => {
+    setJoinOptions(null);
+    lastJoinCode.current = undefined;
   }, []);
 
   const leaveRoom = useCallback(() => {
@@ -287,6 +373,9 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         createRoom,
         joinRoom,
         joinByCode,
+        joinOptions,
+        resolveJoinOptions,
+        dismissJoinOptions,
         leaveRoom,
         toggleReady,
         addBot,

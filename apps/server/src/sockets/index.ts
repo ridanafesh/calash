@@ -94,15 +94,15 @@ export function createSocketServer(httpServer: HttpServer): Server<
       });
     });
 
-    socket.on('room:join', (roomId) => {
-      handleRoomJoin(socket, io, roomId).catch((err) => {
+    socket.on('room:join', (roomId, code, choice) => {
+      handleRoomJoin(socket, io, roomId, code, choice).catch((err) => {
         console.error('[socket] room:join error:', err);
         socket.emit('room:error', { code: 'INTERNAL_ERROR', message: 'Internal server error.' });
       });
     });
 
-    socket.on('room:join-by-code', (code) => {
-      handleRoomJoinByCode(socket, io, code).catch((err) => {
+    socket.on('room:join-by-code', (code, choice) => {
+      handleRoomJoinByCode(socket, io, code, choice).catch((err) => {
         console.error('[socket] room:join-by-code error:', err);
         socket.emit('room:error', { code: 'INTERNAL_ERROR', message: 'Internal server error.' });
       });

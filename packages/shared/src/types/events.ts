@@ -21,15 +21,49 @@ export interface RoomCreateOptions {
    * later via `room:add-bot` from this host.  Defaults to 'easy'.
    */
   botDifficulty?: import('./game.js').BotDifficulty;
+  /**
+   * When true the room is "locked": still listed publicly in the lobby
+   * but joining requires the 6-character invite code. When false (the
+   * default) any user can join without supplying the code.
+   *
+   * The invite code itself exists for both privacy modes — open rooms
+   * still surface the code so the host can share it directly.
+   */
+  isPrivate?: boolean;
 }
+
+/**
+ * Discriminated payload for the seat-choice flow. After `room:join`/`room:join-by-code`
+ * the server inspects the room and may respond with either a direct
+ * 'room:updated' (single-option case) or a 'room:join-options' event that
+ * surfaces the choices to the client. The client then sends back this
+ * structured response naming the chosen path.
+ *
+ *   - replace-bot:   take over a specific bot seat. Server validates the
+ *                    target is still a host-created bot AND not a
+ *                    departed-human's substitute.
+ *   - empty-seat:    take an empty seat. If a round is in progress the
+ *                    seat is created in `isWaiting: true` mode and the
+ *                    player joins the next round's deal.
+ */
+export type RoomJoinChoice =
+  | { kind: 'replace-bot'; botUserId: string }
+  | { kind: 'empty-seat' };
 
 /** Events the client sends to the server. */
 export interface ClientToServerEvents {
   'room:create': (options: RoomCreateOptions) => void;
-  /** Join by UUID room ID (for links / REST lookup). */
-  'room:join': (roomId: string) => void;
-  /** Join by 6-character invite code. */
-  'room:join-by-code': (code: string) => void;
+  /**
+   * Join by UUID room ID (for links / REST lookup).
+   * `code` is required when the room is private/locked. Empty/undefined
+   * means "I'm not supplying a code" — server enforces.
+   * `choice` is optional: if both bot replacement and empty seats are
+   * available the server sends 'room:join-options' first and the client
+   * resubmits with `choice` set.
+   */
+  'room:join': (roomId: string, code?: string, choice?: RoomJoinChoice) => void;
+  /** Join by 6-character invite code. The code itself satisfies the lock. */
+  'room:join-by-code': (code: string, choice?: RoomJoinChoice) => void;
   'room:leave': () => void;
   /** Toggle the calling player's ready state. */
   'room:ready': () => void;
@@ -67,6 +101,27 @@ export interface ClientToServerEvents {
 /** Events the server broadcasts to clients. */
 export interface ServerToClientEvents {
   'room:updated': (room: GameRoom) => void;
+  /**
+   * Sent when a join attempt could land on either a bot replacement OR
+   * an empty seat. The client must resubmit `room:join` (or
+   * `room:join-by-code`) with a `choice` payload to disambiguate.
+   *
+   * If only one option exists the server skips this event and applies
+   * the single legal choice automatically.
+   */
+  'room:join-options': (options: {
+    roomId: string;
+    /** Bot seats the joiner may replace. Only host-created bots —
+     *  departed-human substitutes are excluded so the original human
+     *  can still reclaim their seat. */
+    replaceableBots: Array<{ userId: string; displayName: string; seatIndex: number }>;
+    /** True if at least one truly-empty seat is open (not occupied by
+     *  a human, bot, or waiting player). */
+    hasEmptySeat: boolean;
+    /** True if the room is mid-round. Empty-seat joiners while this is
+     *  true land in 'waiting' state until the next round. */
+    roundInProgress: boolean;
+  }) => void;
   /**
    * General-purpose error broadcast.
    *

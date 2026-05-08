@@ -406,6 +406,43 @@ export function GameBoard() {
     );
   }
 
+  // Waiting players took an empty seat mid-round; they hold the seat
+  // but aren't part of the current RoundState (no hand, no turn).
+  // Render a friendly waiting screen instead of the gameplay UI —
+  // they'll be folded into the next round automatically by the
+  // round-transition flow.
+  const mySlot = room?.players.find((p) => p.userId === myId);
+  if (mySlot?.isWaiting) {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          height: '100vh',
+          gap: 16,
+          padding: '1rem',
+          textAlign: 'center',
+        }}
+      >
+        <div style={{ fontSize: '3rem' }}>💺</div>
+        <h2 style={{ fontSize: '1.4rem', fontWeight: 700, margin: 0 }}>
+          {t('waiting.forNextRound')}
+        </h2>
+        <p style={{ color: 'var(--text-secondary)', maxWidth: 400, margin: 0 }}>
+          {t('waiting.forNextRoundHelp')}
+        </p>
+        <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+          {t('game.round', { n: gameState.roundNumber })}
+        </span>
+        <button className="btn btn-ghost" onClick={leaveRoom}>
+          {t('game.leave')}
+        </button>
+      </div>
+    );
+  }
+
   const canDrawOrTake = isMyTurn && gameState.turnPhase === 'awaiting-draw-or-take';
   const canHold = isMyTurn && gameState.turnPhase === 'holding';
   const hasGoneDown = myState?.hasGoneDown ?? false;

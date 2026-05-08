@@ -20,6 +20,10 @@ function CreateRoomInner() {
   const [maxPlayers, setMaxPlayers] = useState(4);
   const [mode, setMode] = useState<RoomMode>('multiplayer');
   const [fillEmptySeats, setFillEmptySeats] = useState(false);
+  // Locked rooms still appear in the public list but require the
+  // invite code to join. Default to "open" — most users want
+  // friction-free joins.
+  const [isPrivate, setIsPrivate] = useState(false);
   const [creating, setCreating] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -67,6 +71,10 @@ function CreateRoomInner() {
       maxPlayers,
       fillWithBots: mode === 'vs-computer' || fillEmptySeats,
       botDifficulty: 'easy',
+      // vs-computer rooms are inherently single-player and don't need
+      // the privacy gate; force them to open so the host doesn't
+      // accidentally lock themselves into a code.
+      isPrivate: mode === 'multiplayer' ? isPrivate : false,
     });
 
     clearTimer();
@@ -174,6 +182,58 @@ function CreateRoomInner() {
                   {t('rooms.create.fillWithBots')}
                 </span>
               </label>
+
+              <div className="field">
+                <label className="label">{t('rooms.create.privacy')}</label>
+                <div className="row" style={{ gap: 8 }}>
+                  <button
+                    type="button"
+                    onClick={() => setIsPrivate(false)}
+                    disabled={creating}
+                    style={{
+                      flex: 1,
+                      padding: '0.75rem',
+                      borderRadius: 10,
+                      border: !isPrivate ? '2px solid var(--accent)' : '1px solid var(--border)',
+                      background: !isPrivate ? 'rgba(99,102,241,0.12)' : 'var(--surface-2)',
+                      color: 'var(--text-primary)',
+                      cursor: creating ? 'not-allowed' : 'pointer',
+                      textAlign: 'left',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    <div style={{ fontWeight: 700, fontSize: '0.95rem', marginBottom: 2 }}>
+                      🌐 {t('rooms.create.privacyOpen')}
+                    </div>
+                    <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                      {t('rooms.create.privacyOpenSub')}
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsPrivate(true)}
+                    disabled={creating}
+                    style={{
+                      flex: 1,
+                      padding: '0.75rem',
+                      borderRadius: 10,
+                      border: isPrivate ? '2px solid var(--accent)' : '1px solid var(--border)',
+                      background: isPrivate ? 'rgba(99,102,241,0.12)' : 'var(--surface-2)',
+                      color: 'var(--text-primary)',
+                      cursor: creating ? 'not-allowed' : 'pointer',
+                      textAlign: 'left',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    <div style={{ fontWeight: 700, fontSize: '0.95rem', marginBottom: 2 }}>
+                      🔒 {t('rooms.create.privacyLocked')}
+                    </div>
+                    <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                      {t('rooms.create.privacyLockedSub')}
+                    </div>
+                  </button>
+                </div>
+              </div>
             </>
           )}
 

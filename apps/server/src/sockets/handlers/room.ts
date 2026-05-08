@@ -32,11 +32,13 @@ function toGameRoom(room: RoomState): GameRoom {
     isConnected: p.isBot || p.socketId !== null,
     isBot: p.isBot,
     botDifficulty: p.botDifficulty,
+    ...(p.isWaiting ? { isWaiting: true } : {}),
   }));
 
   return {
     id: room.roomId,
     code: room.inviteCode,
+    isPrivate: room.isPrivate,
     hostUserId: room.hostUserId,
     status: room.status,
     maxPlayers: room.maxPlayers,
@@ -187,6 +189,7 @@ export async function restorePlayerToRoom(
     const newRoom: RoomState = {
       roomId: full.id,
       inviteCode: (full as typeof full & { invite_code?: string }).invite_code ?? '',
+      isPrivate: (full as typeof full & { is_private?: boolean }).is_private ?? false,
       hostUserId: full.host_user_id,
       status: full.status === 'in_progress' ? 'in-progress' : full.status === 'finished' ? 'finished' : 'lobby',
       maxPlayers: full.max_players,
@@ -202,6 +205,7 @@ export async function restorePlayerToRoom(
             displayName: meta?.displayName ?? p.user_id,
             isBot: meta?.isBot ?? false,
             ...(meta?.isBot ? { botDifficulty: 'easy' as BotDifficulty } : {}),
+            isWaiting: (p as typeof p & { is_waiting?: boolean }).is_waiting ?? false,
           };
         }),
       round: null,
@@ -261,7 +265,7 @@ export async function handleRoomCreate(
     return;
   }
 
-  const { maxPlayers, fillWithBots, botDifficulty } = options;
+  const { maxPlayers, fillWithBots, botDifficulty, isPrivate = false } = options;
   if (maxPlayers < GAME_CONFIG.MIN_PLAYERS || maxPlayers > GAME_CONFIG.MAX_PLAYERS) {
     emitError(socket, 'INVALID_MAX_PLAYERS', `maxPlayers must be ${GAME_CONFIG.MIN_PLAYERS}–${GAME_CONFIG.MAX_PLAYERS}`);
     return;
@@ -273,15 +277,19 @@ export async function handleRoomCreate(
   const dbRoom = await db.rooms.create({
     hostUserId: playerId,
     maxPlayers,
-    settings: { inviteCode },
+    settings: { inviteCode, isPrivate },
   });
 
-  // Persist invite code via raw query (the migration adds the column).
-  await pool.query('UPDATE game_rooms SET invite_code = $1 WHERE id = $2', [inviteCode, dbRoom.id]);
+  // Persist invite code + privacy via raw query (the migrations add the columns).
+  await pool.query(
+    'UPDATE game_rooms SET invite_code = $1, is_private = $2 WHERE id = $3',
+    [inviteCode, isPrivate, dbRoom.id],
+  );
 
   const room: RoomState = {
     roomId: dbRoom.id,
     inviteCode,
+    isPrivate,
     hostUserId: playerId,
     status: 'lobby',
     maxPlayers,
@@ -416,25 +424,22 @@ async function joinRoom(
   socket: CalashSocket,
   io: CalashServer,
   room: RoomState,
+  opts: { code?: string; choice?: import('@calash/shared').RoomJoinChoice } = {},
 ): Promise<void> {
   const { playerId, displayName } = socket.data;
 
-  // If player is already in this room (reconnect / reclaim), just restore.
-  // Two sub-cases:
+  // ── Reconnect / reclaim path ─────────────────────────────────────────
+  // Player already has a slot in this room. Two sub-cases:
   //   - existing.isBot === false: ordinary reconnect (refresh / dropped
   //     socket / second tab). Update the socket, push state, done.
   //   - existing.isBot === true: the seat was substituted because this
   //     player previously left mid-game. Flip it back to a human seat
-  //     and cancel any pending bot timer so the bot driver doesn't
-  //     fight the rejoining human for the next action.
+  //     and cancel any pending bot timer.
   const existing = room.players.find((p) => p.userId === playerId);
   if (existing) {
     const wasBotSubstitute = existing.isBot;
     if (wasBotSubstitute) {
       reclaimSeatFromBot(existing, socket.id, displayName ?? existing.displayName);
-      // Cancel any pending bot turn for this room — the human is back
-      // and may want to act before the bot's setTimeout fires.
-      // (cancelBotTimer also resets the per-room failure counter.)
       const { cancelBotTimer } = await import('./game.js');
       cancelBotTimer(room.roomId);
     } else {
@@ -443,11 +448,7 @@ async function joinRoom(
     socket.data.roomId = room.roomId;
     await socket.join(room.roomId);
     socket.emit('room:updated', toGameRoom(room));
-    if (wasBotSubstitute) {
-      // Tell every other player in the room the seat is back under
-      // human control so their UI flips the bot badge off.
-      broadcastRoomUpdate(io, room);
-    }
+    if (wasBotSubstitute) broadcastRoomUpdate(io, room);
 
     if (room.round) {
       const { toRoundStateView } = await import('@calash/game-core');
@@ -468,37 +469,156 @@ async function joinRoom(
     return;
   }
 
-  if (room.status !== 'lobby') {
-    logRoom('join-rejected', {
-      roomId: room.roomId,
-      roomCode: room.inviteCode,
-      userId: playerId,
-      status: room.status,
-      reason: 'GAME_IN_PROGRESS',
-    });
-    socket.emit('room:error', { code: 'GAME_IN_PROGRESS', message: 'This room has already started.' });
-    return;
+  // ── Locked-room code gating ──────────────────────────────────────────
+  // Only checked for fresh joins (not reconnects). Open rooms ignore the
+  // code entirely. The case-insensitive comparison matches how invite
+  // codes are stored (always uppercase).
+  if (room.isPrivate) {
+    const supplied = (opts.code ?? '').trim().toUpperCase();
+    if (supplied !== room.inviteCode.toUpperCase()) {
+      logRoom('join-rejected', {
+        roomId: room.roomId,
+        userId: playerId,
+        reason: supplied === '' ? 'CODE_REQUIRED' : 'INVALID_CODE',
+      });
+      socket.emit('room:error', {
+        code: supplied === '' ? 'CODE_REQUIRED' : 'INVALID_CODE',
+        message: supplied === ''
+          ? 'This is a locked room. Enter the room code to join.'
+          : 'The room code is incorrect.',
+      });
+      return;
+    }
   }
 
-  const activePlayers = room.players.filter((p) => p.socketId !== null || true);
-  if (activePlayers.length >= room.maxPlayers) {
+  // ── Compute seat options ─────────────────────────────────────────────
+  // - Replaceable bots: bots that are NOT human-substitutes (host-created
+  //   bots only — leave/rejoin reclaim still works because human
+  //   substitutes stay reserved for their original human).
+  // - Empty seats: max - count of OCCUPIED slots (waiting players also
+  //   hold a seat, so they count as occupied).
+  const replaceableBots = room.players.filter((p) => p.isBot && !p.isHumanSubstitute);
+  const occupiedSeatCount = room.players.length;
+  const hasEmptySeat = occupiedSeatCount < room.maxPlayers;
+  const roundInProgress = room.status === 'in-progress';
+
+  // No seat available at all: hard failure.
+  if (!hasEmptySeat && replaceableBots.length === 0) {
+    logRoom('join-rejected', {
+      roomId: room.roomId,
+      userId: playerId,
+      reason: 'ROOM_FULL',
+      status: room.status,
+    });
     socket.emit('room:error', { code: 'ROOM_FULL', message: 'This room is full.' });
     return;
   }
 
-  // Persist (or reactivate) the player record. The repository handles
-  // the rejoin case — if the user previously left this room their
-  // existing row is reactivated and we keep their old seat index.
+  // Both options exist + caller didn't pick → ask. Only ask once per
+  // join; on resubmit the choice arrives in opts.choice.
+  if (hasEmptySeat && replaceableBots.length > 0 && !opts.choice) {
+    socket.emit('room:join-options', {
+      roomId: room.roomId,
+      replaceableBots: replaceableBots.map((b) => ({
+        userId: b.userId,
+        displayName: b.displayName,
+        seatIndex: b.seatIndex,
+      })),
+      hasEmptySeat: true,
+      roundInProgress,
+    });
+    logRoom('join-needs-choice', {
+      roomId: room.roomId,
+      userId: playerId,
+      replaceableBotCount: replaceableBots.length,
+      roundInProgress,
+    });
+    return;
+  }
+
+  // Determine the path:
+  //   - 'replace-bot' explicitly chosen, or only bots are available.
+  //   - 'empty-seat' explicitly chosen, or only empty seats are available.
+  let path: 'replace-bot' | 'empty-seat';
+  if (opts.choice?.kind === 'replace-bot' || (replaceableBots.length > 0 && !hasEmptySeat)) {
+    path = 'replace-bot';
+  } else {
+    path = 'empty-seat';
+  }
+
+  if (path === 'replace-bot') {
+    // Pick the targeted bot (validated to still be a replaceable bot)
+    // or the first replaceable bot if no specific one was named.
+    const requestedId = opts.choice?.kind === 'replace-bot' ? opts.choice.botUserId : null;
+    const target = requestedId
+      ? replaceableBots.find((b) => b.userId === requestedId)
+      : replaceableBots[0];
+    if (!target) {
+      socket.emit('room:error', {
+        code: 'BOT_NOT_AVAILABLE',
+        message: 'That bot seat is no longer available.',
+      });
+      return;
+    }
+    await replaceBotWithHuman(room, target, {
+      humanUserId: playerId,
+      socketId: socket.id,
+      displayName: displayName ?? playerId,
+    });
+    socket.data.roomId = room.roomId;
+    await socket.join(room.roomId);
+    roomStore.trackUser(playerId, room.roomId);
+
+    socket.emit('room:updated', toGameRoom(room));
+    if (room.round) {
+      const { toRoundStateView } = await import('@calash/game-core');
+      socket.emit('game:state', toRoundStateView(room.round.state));
+      const ps = room.round.state.playerStates[playerId];
+      if (ps) socket.emit('game:hand', ps.hand);
+    }
+    broadcastRoomUpdate(io, room);
+    // The bot driver might have a pending turn for this seat — cancel
+    // so the now-human seat can act first.
+    const { cancelBotTimer } = await import('./game.js');
+    cancelBotTimer(room.roomId);
+
+    logRoom('replace-bot', {
+      action: 'join',
+      roomId: room.roomId,
+      roomCode: room.inviteCode,
+      userId: playerId,
+      replacedBotId: target.userId,
+      seatIndex: target.seatIndex,
+      status: room.status,
+      activePlayerCount: room.players.length,
+    });
+    return;
+  }
+
+  // path === 'empty-seat': ordinary join into an empty seat. If the
+  // room is mid-round we mark this slot as 'isWaiting' — they don't
+  // appear in the current RoundState; startGame's next call (round
+  // transition) will pick them up.
   const { row: dbRow, kind } = await db.rooms.addPlayer(room.roomId, playerId);
   const seatIndex = dbRow.seat_index;
+  const isWaiting = roundInProgress;
 
-  const slot = {
+  // Persist the waiting flag so the round-end DB rebuild path keeps it.
+  if (isWaiting) {
+    await pool.query(
+      'UPDATE game_room_players SET is_waiting = true WHERE room_id = $1 AND user_id = $2',
+      [room.roomId, playerId],
+    );
+  }
+
+  const slot: PlayerSlot = {
     userId: playerId,
     seatIndex,
     isReady: false,
     socketId: socket.id,
     displayName: displayName ?? playerId,
     isBot: false,
+    isWaiting,
   };
   room.players.push(slot);
   roomStore.trackUser(playerId, room.roomId);
@@ -506,8 +626,21 @@ async function joinRoom(
   socket.data.roomId = room.roomId;
   await socket.join(room.roomId);
 
+  socket.emit('room:updated', toGameRoom(room));
+  if (room.round && !isWaiting) {
+    // Edge case: room is in-progress but the slot is NOT waiting (means
+    // we somehow joined a non-mid-round room? shouldn't happen, but
+    // defensive — push state if there is a round.)
+    const { toRoundStateView } = await import('@calash/game-core');
+    socket.emit('game:state', toRoundStateView(room.round.state));
+  } else if (room.round && isWaiting) {
+    // Waiting players SEE the public round view but get no hand.
+    const { toRoundStateView } = await import('@calash/game-core');
+    socket.emit('game:state', toRoundStateView(room.round.state));
+  }
   broadcastRoomUpdate(io, room);
-  logRoom('join', {
+
+  logRoom(isWaiting ? 'join-waiting' : (kind === 'reactivated' ? 'rejoin' : 'join'), {
     action: kind === 'reactivated' ? 'rejoin' : 'join',
     roomId: room.roomId,
     roomCode: room.inviteCode,
@@ -515,13 +648,96 @@ async function joinRoom(
     seatIndex,
     status: room.status,
     activePlayerCount: room.players.length,
+    waiting: isWaiting,
   });
+}
+
+/**
+ * Replace a host-created bot with a joining human.
+ *
+ * Strategy: rewrite the bot's user_id in the in-memory PlayerSlot to
+ * the human's id, then rewrite the round state's user-id-keyed maps
+ * (playerOrder, playerStates, currentTurnPlayerId, hand record) and
+ * the persisted hand row. Audit history (game_moves, game_meld_cards
+ * .added_by_user_id, game_scores) keeps the bot's id — those rows
+ * reflect what actually happened, which was the bot acting.
+ *
+ * The DB game_room_players row is updated in place (user_id changed,
+ * is_ready left as-is). The bot's user record stays in the users table
+ * (FKed by audit history); it just stops being referenced as a player.
+ */
+async function replaceBotWithHuman(
+  room: RoomState,
+  botSlot: PlayerSlot,
+  human: { humanUserId: string; socketId: string; displayName: string },
+): Promise<void> {
+  const oldUserId = botSlot.userId;
+  const newUserId = human.humanUserId;
+
+  // 1. Round state rewrite — only meaningful when there's an active round.
+  if (room.round) {
+    const state = room.round.state;
+    const newPlayerOrder = state.playerOrder.map((id) => (id === oldUserId ? newUserId : id));
+    const newPlayerStates = { ...state.playerStates } as typeof state.playerStates;
+    if (newPlayerStates[oldUserId]) {
+      newPlayerStates[newUserId] = { ...newPlayerStates[oldUserId], playerId: newUserId };
+      delete newPlayerStates[oldUserId];
+    }
+    room.round.state = {
+      ...state,
+      playerOrder: newPlayerOrder,
+      playerStates: newPlayerStates,
+      currentTurnPlayerId: state.currentTurnPlayerId === oldUserId ? newUserId : state.currentTurnPlayerId,
+    };
+    // Rewrite cumulative + per-round score maps to use the new id.
+    if (oldUserId in room.round.cumulativeScores) {
+      room.round.cumulativeScores[newUserId] = room.round.cumulativeScores[oldUserId];
+      delete room.round.cumulativeScores[oldUserId];
+    }
+    if (oldUserId in room.round.roundScores) {
+      room.round.roundScores[newUserId] = room.round.roundScores[oldUserId];
+      delete room.round.roundScores[oldUserId];
+    }
+
+    // Persist the hand row's user_id swap so reconnects from DB land
+    // on the right hand. game_moves / game_meld_cards are audit logs
+    // and are intentionally NOT rewritten — they reflect what the bot
+    // actually did.
+    await pool.query(
+      `UPDATE game_round_hands SET user_id = $1
+       WHERE round_id = $2 AND user_id = $3`,
+      [newUserId, room.round.roundId, oldUserId],
+    );
+  }
+
+  // 2. Slot rewrite: the same array index keeps its seatIndex; we just
+  //    flip the occupant. user_id changes, isBot=false, socket attached.
+  botSlot.userId = newUserId;
+  botSlot.isBot = false;
+  botSlot.botDifficulty = undefined;
+  botSlot.isHumanSubstitute = false;
+  botSlot.socketId = human.socketId;
+  botSlot.displayName = human.displayName;
+
+  // 3. DB game_room_players row: swap user_id so future restores see
+  //    the human, not the bot. Mark as not waiting (this is an active seat).
+  await pool.query(
+    `UPDATE game_room_players
+     SET user_id = $1, is_waiting = false, left_at = NULL
+     WHERE room_id = $2 AND user_id = $3`,
+    [newUserId, room.roomId, oldUserId],
+  );
+
+  // 4. roomStore user-index: the bot was tracked under its id; untrack it.
+  roomStore.untrackUser(oldUserId);
 }
 
 export async function handleRoomJoin(
   socket: CalashSocket,
   io: CalashServer,
   roomId: string,
+  code?: string,
+  choice?: import('@calash/shared').RoomJoinChoice,
 ): Promise<void> {
   const { playerId: _playerId } = socket.data;
 
@@ -541,6 +757,7 @@ export async function handleRoomJoin(
     room = {
       roomId: dbRoom.id,
       inviteCode: (dbRoom as typeof dbRoom & { invite_code?: string }).invite_code ?? '',
+      isPrivate: (dbRoom as typeof dbRoom & { is_private?: boolean }).is_private ?? false,
       hostUserId: dbRoom.host_user_id,
       status: dbRoom.status === 'in_progress' ? 'in-progress' : dbRoom.status === 'finished' ? 'finished' : 'lobby',
       maxPlayers: dbRoom.max_players,
@@ -556,6 +773,7 @@ export async function handleRoomJoin(
             displayName: m?.displayName ?? p.user_id,
             isBot: m?.isBot ?? false,
             ...(m?.isBot ? { botDifficulty: 'easy' as BotDifficulty } : {}),
+            isWaiting: (p as typeof p & { is_waiting?: boolean }).is_waiting ?? false,
           };
         });
       })(),
@@ -564,13 +782,14 @@ export async function handleRoomJoin(
     roomStore.set(room);
   }
 
-  await joinRoom(socket, io, room);
+  await joinRoom(socket, io, room, { code, choice });
 }
 
 export async function handleRoomJoinByCode(
   socket: CalashSocket,
   io: CalashServer,
   code: string,
+  choice?: import('@calash/shared').RoomJoinChoice,
 ): Promise<void> {
   const { playerId: _playerId } = socket.data;
   const normalised = code.trim().toUpperCase();
@@ -593,11 +812,13 @@ export async function handleRoomJoinByCode(
       emitError(socket, 'ROOM_NOT_FOUND', `No room with code ${normalised}.`);
       return;
     }
-    await handleRoomJoin(socket, io, rows[0].id);
+    // Forward both the code (proves access for locked rooms) and the choice.
+    await handleRoomJoin(socket, io, rows[0].id, normalised, choice);
     return;
   }
 
-  await joinRoom(socket, io, room);
+  // The supplied invite code already satisfies any privacy gate.
+  await joinRoom(socket, io, room, { code: normalised, choice });
 }
 
 // ─── room:leave ──────────────────────────────────────────────────────────────
@@ -782,6 +1003,32 @@ export function handleDisconnect(
 async function startGame(room: RoomState, io: CalashServer): Promise<void> {
   const { initRound, toRoundStateView } = await import('@calash/game-core');
 
+  // Round-transition + first-game inclusion logic.
+  //
+  // Players who joined a fresh empty seat WHILE the previous round was
+  // running are flagged isWaiting=true. They held their seat but didn't
+  // play that round. As soon as we start the next round we:
+  //   1. Include them in playerIds (deal them cards).
+  //   2. Clear their isWaiting flag — they're now an active player.
+  //   3. Clear is_waiting in the DB so the next reconnect sees them
+  //      as fully active.
+  // Their cumulativeScores entry starts at 0 (they didn't play prior
+  // rounds, so we don't fabricate history).
+  const waitingIds: string[] = [];
+  for (const p of room.players) {
+    if (p.isWaiting) {
+      p.isWaiting = false;
+      waitingIds.push(p.userId);
+    }
+  }
+  if (waitingIds.length > 0) {
+    await pool.query(
+      `UPDATE game_room_players SET is_waiting = false
+       WHERE room_id = $1 AND user_id = ANY($2::uuid[])`,
+      [room.roomId, waitingIds],
+    );
+  }
+
   const playerIds = room.players.map((p) => p.userId);
 
   // Honor pre-existing round state when present (this is a follow-on round
@@ -790,12 +1037,18 @@ async function startGame(room: RoomState, io: CalashServer): Promise<void> {
   const previous = room.round;
   const roundNumber = previous ? previous.roundNumber : 1;
   const dealerIndex = previous ? previous.dealerIndex : 0;
+  // For previously-waiting players, ensure they have a 0 entry in the
+  // cumulative + per-round score maps (they're new this round).
   const cumulativeScores = previous
-    ? previous.cumulativeScores
+    ? { ...previous.cumulativeScores }
     : Object.fromEntries(playerIds.map((id) => [id, 0]));
   const roundScores = previous
-    ? previous.roundScores
+    ? { ...previous.roundScores }
     : Object.fromEntries(playerIds.map((id) => [id, []]));
+  for (const id of waitingIds) {
+    if (!(id in cumulativeScores)) cumulativeScores[id] = 0;
+    if (!(id in roundScores)) roundScores[id] = [];
+  }
 
   // initRound builds a fresh deck/hand/discard for THIS round. All
   // round-only state (hands, melds, hasGoneDown, didTakeFromDiscardThisTurn,

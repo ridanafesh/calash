@@ -148,6 +148,13 @@ export interface RoomPlayer {
   isBot: boolean;
   /** Set when isBot is true. Indicates which strategy the bot uses. */
   botDifficulty?: BotDifficulty;
+  /**
+   * True when the player joined a fresh empty seat WHILE a round was
+   * already in progress. They hold the seat but don't deal/play this
+   * round — they enter on the next round transition. Cleared by
+   * startGame when the next round actually starts.
+   */
+  isWaiting?: boolean;
 }
 
 /** Client-visible representation of a game room. */
@@ -157,6 +164,8 @@ export interface GameRoom {
   hostUserId: string;
   status: GameStatus;
   maxPlayers: number;
+  /** When true the room requires the invite code to join (locked). */
+  isPrivate?: boolean;
   players: RoomPlayer[];
   currentRound: number;
 }

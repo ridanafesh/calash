@@ -8,12 +8,13 @@ import { useAuth } from '@/lib/auth-context';
 import { useGame } from '@/lib/game-context';
 import { useT } from '@/lib/i18n';
 import { LanguageSwitcher } from '@/components/LanguageSwitcher';
+import { SeatChoicePopup } from '@/components/game/SeatChoicePopup';
 import { apiClient } from '@/lib/api';
 import type { GameRoom } from '@calash/shared';
 
 function LobbyInner() {
   const { user, logout } = useAuth();
-  const { room, connected, createRoom, roomError } = useGame();
+  const { room, connected, createRoom, joinByCode, roomError, clearError } = useGame();
   const router = useRouter();
   const t = useT();
 
@@ -21,6 +22,40 @@ function LobbyInner() {
   const [loadingRooms, setLoadingRooms] = useState(true);
   const [fetchError, setFetchError] = useState('');
   const [startingVsBot, setStartingVsBot] = useState(false);
+  // Locked-room code prompt: target room id + the typed code + an
+  // error message we surface inline. Dismissed on Cancel or success.
+  const [lockedPrompt, setLockedPrompt] = useState<{ roomId: string; code: string } | null>(null);
+  const [lockedPromptError, setLockedPromptError] = useState<string | null>(null);
+
+  function startJoin(r: GameRoom): void {
+    if (r.isPrivate) {
+      setLockedPrompt({ roomId: r.id, code: '' });
+      setLockedPromptError(null);
+      return;
+    }
+    // Open room: navigate immediately. The rooms/[id] page emits
+    // room:join automatically on mount.
+    router.push(`/rooms/${r.id}`);
+  }
+
+  function submitLockedJoin(): void {
+    if (!lockedPrompt) return;
+    const code = lockedPrompt.code.trim().toUpperCase();
+    if (code.length !== 6) {
+      setLockedPromptError(t('lobby.lockedRoomError'));
+      return;
+    }
+    clearError();
+    setLockedPromptError(null);
+    // joinByCode handles the locked-room handshake server-side: the
+    // code itself satisfies the privacy gate, so the join lands
+    // (or surfaces a server error which we'll display).
+    joinByCode(code);
+    // Optimistic navigation — if the server rejects we'll bounce back
+    // and show the error via the existing roomError flow.
+    router.push(`/rooms/${lockedPrompt.roomId}`);
+    setLockedPrompt(null);
+  }
 
   function startVsComputer() {
     if (!connected || startingVsBot) return;
@@ -111,25 +146,104 @@ function LobbyInner() {
           </div>
         ) : (
           <div className="col" style={{ gap: '0.6rem' }}>
-            {openRooms.map((r) => (
-              <div key={r.id} className="surface row" style={{ justifyContent: 'space-between', gap: 12 }}>
-                <div style={{ minWidth: 0 }}>
-                  <div className="row" style={{ gap: 8, marginBottom: 4 }}>
-                    <span className="room-code" style={{ fontSize: '0.9rem', letterSpacing: '0.15em', padding: '2px 8px' }}>
-                      {r.code}
-                    </span>
-                    <span className="badge badge-success">{t('lobby.open')}</span>
+            {openRooms.map((r) => {
+              const hasBots = r.players.some((p) => p.isBot);
+              return (
+                <div key={r.id} className="surface row" style={{ justifyContent: 'space-between', gap: 12 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div className="row" style={{ gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
+                      <span className="room-code" style={{ fontSize: '0.9rem', letterSpacing: '0.15em', padding: '2px 8px' }}>
+                        {r.code}
+                      </span>
+                      {r.isPrivate ? (
+                        <span className="badge badge-neutral" title={t('lobby.lockedRoomTitle')}>
+                          🔒 {t('lobby.locked')}
+                        </span>
+                      ) : (
+                        <span className="badge badge-success">{t('lobby.open')}</span>
+                      )}
+                      {hasBots && (
+                        <span className="badge badge-accent" style={{ fontSize: '0.7rem' }}>
+                          🤖 {t('waiting.bot')}
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                      {r.players.length}/{r.maxPlayers} {t('lobby.players', { n: r.players.length })}
+                      {r.players.length > 0 && ` · ${r.players.map((p) => p.displayName).join(', ')}`}
+                    </div>
                   </div>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                    {r.players.length}/{r.maxPlayers} {t('lobby.players', { n: r.players.length })}
-                    {r.players.length > 0 && ` · ${r.players.map((p) => p.displayName).join(', ')}`}
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => startJoin(r)}
+                    className="btn btn-primary btn-sm"
+                    style={{ flexShrink: 0 }}
+                  >
+                    {r.isPrivate ? '🔒 ' : ''}{t('lobby.join')} →
+                  </button>
                 </div>
-                <Link href={`/rooms/${r.id}`} className="btn btn-primary btn-sm" style={{ flexShrink: 0 }}>
-                  {t('lobby.join')} →
-                </Link>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Locked-room code prompt — small inline modal. */}
+        {lockedPrompt && (
+          <div className="overlay" role="dialog" aria-modal="true" aria-label={t('lobby.lockedRoomTitle')}>
+            <div className="result-modal" style={{ maxWidth: 380, width: '100%' }}>
+              <h2 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0 }}>🔒 {t('lobby.lockedRoomTitle')}</h2>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', margin: 0 }}>
+                {t('lobby.lockedRoomHint')}
+              </p>
+              <input
+                type="text"
+                className="input"
+                autoFocus
+                placeholder="ABCD12"
+                value={lockedPrompt.code}
+                maxLength={6}
+                onChange={(e) =>
+                  setLockedPrompt({ ...lockedPrompt, code: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '') })
+                }
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') submitLockedJoin();
+                  if (e.key === 'Escape') {
+                    setLockedPrompt(null);
+                    setLockedPromptError(null);
+                  }
+                }}
+                style={{
+                  fontFamily: 'monospace',
+                  fontSize: '1.4rem',
+                  letterSpacing: '0.25em',
+                  textAlign: 'center',
+                  textTransform: 'uppercase',
+                }}
+              />
+              {lockedPromptError && (
+                <div className="error-banner">{lockedPromptError}</div>
+              )}
+              <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => {
+                    setLockedPrompt(null);
+                    setLockedPromptError(null);
+                  }}
+                >
+                  {t('lobby.lockedRoomCancel')}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={submitLockedJoin}
+                  disabled={lockedPrompt.code.length !== 6}
+                >
+                  {t('lobby.lockedRoomSubmit')}
+                </button>
               </div>
-            ))}
+            </div>
           </div>
         )}
 
@@ -140,6 +254,11 @@ function LobbyInner() {
           <Link href="/profile" style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{t('lobby.profile')}</Link>
         </div>
       </div>
+
+      {/* Mounted here so the seat-choice popup overlays the lobby
+          immediately if the server emits room:join-options after a
+          locked-room code submission lands on a mid-round room. */}
+      <SeatChoicePopup />
     </div>
   );
 }

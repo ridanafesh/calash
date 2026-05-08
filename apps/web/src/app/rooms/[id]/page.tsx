@@ -7,6 +7,7 @@ import { AuthGuard } from '@/lib/auth-guard';
 import { useGame } from '@/lib/game-context';
 import { WaitingRoom } from '@/components/game/WaitingRoom';
 import { GameBoard } from '@/components/game/GameBoard';
+import { SeatChoicePopup } from '@/components/game/SeatChoicePopup';
 
 function RoomPageInner() {
   const { id } = useParams<{ id: string }>();
@@ -81,23 +82,36 @@ function RoomPageInner() {
 
   // ── Game in progress ──
   if (room.status === 'in-progress') {
-    return <GameBoard />;
+    return (
+      <>
+        <GameBoard />
+        <SeatChoicePopup />
+      </>
+    );
   }
 
   // ── Finished ──
   if (room.status === 'finished') {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', gap: 20 }}>
-        <div style={{ fontSize: '3rem' }}>🏁</div>
-        <h2 style={{ fontSize: '1.3rem', fontWeight: 700 }}>Game Over</h2>
-        <p style={{ color: 'var(--text-secondary)' }}>Returning to lobby…</p>
-        <Link href="/lobby" className="btn btn-primary" onClick={leaveRoom}>Back to Lobby</Link>
-      </div>
+      <>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', gap: 20 }}>
+          <div style={{ fontSize: '3rem' }}>🏁</div>
+          <h2 style={{ fontSize: '1.3rem', fontWeight: 700 }}>Game Over</h2>
+          <p style={{ color: 'var(--text-secondary)' }}>Returning to lobby…</p>
+          <Link href="/lobby" className="btn btn-primary" onClick={leaveRoom}>Back to Lobby</Link>
+        </div>
+        <SeatChoicePopup />
+      </>
     );
   }
 
-  // ── Lobby ──
-  return <WaitingRoom />;
+  // ── Lobby (waiting room) ──
+  return (
+    <>
+      <WaitingRoom />
+      <SeatChoicePopup />
+    </>
+  );
 }
 
 export default function RoomPage() {
